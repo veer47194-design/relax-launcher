@@ -14,6 +14,8 @@ Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boo
 
 </div>
 
+> Ниже — возможности лаунчера, а затем **гайд по сборке из исходников**. Если нужен просто готовый лаунчер, переходи к разделу [«Скачать»](#скачать).
+
 ![Главный экран лаунчера](docs/screenshot.png)
 
 <details>
@@ -67,15 +69,29 @@ Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boo
 - Галерея скриншотов с просмотрщиком, история загрузок с паузой и отменой, живая консоль.
 - Анимации построены на `opacity`/`transform`, длинные списки используют `content-visibility` — интерфейс не лагает на больших сборках.
 
-## Быстрый старт
+## Гайд по исходникам
+
+Здесь начинается инструкция для тех, кто хочет собрать Relax Launcher из исходников. Если вам просто нужна готовая программа — скачайте установщик в разделе [«Скачать»](#скачать), следующий шаг не обязателен.
+
+### Что понадобится
+
+- **Windows 10/11 (x64)** — лаунчер собирается и работает только под 64-битный Windows.
+- **Node.js 20+ и npm** — сборка main/preload идёт через esbuild, renderer — через Vite. Проверьте версии: `node -v` и `npm -v`.
+- **Git** — чтобы клонировать репозиторий (можно также скачать исходники ZIP-архивом на странице репозитория).
+- **Интернет** — для установки зависимостей, а затем для загрузки версий Minecraft, модов и Java при первом запуске.
+- **Свободное место** — несколько гигабайт: зависимости сборки, рантайм Java и файлы игры.
+
+### Установка и запуск
 
 ```bash
+git clone https://github.com/veer47194-design/relax-launcher.git
+cd relax-launcher
 npm install
 npm run build     # esbuild (main + preload) и Vite (renderer)
 npm start         # запустить приложение
 ```
 
-Для разработки с горячей перезагрузкой:
+Для разработки с горячей перезагрузкой интерфейса и автопересборкой main:
 
 ```bash
 npm run dev
@@ -94,8 +110,8 @@ npm run dist:win
 # результат — в папке release/
 ```
 
-> **npm 12+**: если после `npm install` Electron не запускается, разрешите скрипты:  
-> `npm install-scripts approve electron esbuild` или `node node_modules/electron/install.js`.
+> **npm 12+**: если после `npm install` Electron не запускается, разрешите скрипты зависимостей:  
+> `npm install-scripts approve electron esbuild` или вручную `node node_modules/electron/install.js`.
 
 ## Горячие клавиши
 
