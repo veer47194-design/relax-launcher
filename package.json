@@ -1,0 +1,82 @@
+{
+  "name": "relax-launcher",
+  "productName": "Relax Launcher",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relax Launcher — быстрый лаунчер Minecraft: Vanilla, Fabric, моды и сборки Modrinth, офлайн-аккаунты",
+  "author": "Relax",
+  "license": "MIT",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:portable": "npm run build && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "allowScripts": {
+    "electron@45.4.1": true,
+    "esbuild@0.28.2": true
+  },
+  "build": {
+    "appId": "com.relax.launcher",
+    "productName": "Relax Launcher",
+    "copyright": "Copyright © 2026 Relax",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Relax Launcher",
+      "artifactName": "Relax-Launcher-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Relax-Launcher-Portable-${version}.${ext}"
+    }
+  }
+}
