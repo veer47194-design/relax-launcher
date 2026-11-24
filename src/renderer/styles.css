@@ -1660,6 +1660,23 @@ a {
   margin-left: auto;
 }
 
+.project-foot .project-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.project-foot .project-actions .btn {
+  margin-left: 0;
+}
+
+.project-card.installed {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.035), transparent 55%), var(--panel);
+}
+
 .load-more {
   display: flex;
   justify-content: center;

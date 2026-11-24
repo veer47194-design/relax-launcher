@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Instance, ModInfo, MrSearchHit, OptimizeMod } from '../../shared/types'
 import type { ModsTab } from '../context'
 import { api, errText, fmtBytes, fmtNumber, loaderLabel } from '../api'
+import { findInstalledContent } from '../content'
 import { useApp } from '../context'
 import {
   Badge,
@@ -158,7 +159,12 @@ export default function Mods({
       )}
 
       {modsTab === 'catalog' && (
-        <CatalogTab instance={instance} enabled={isModded} onInstalled={loadInstalled} />
+        <CatalogTab
+          instance={instance}
+          enabled={isModded}
+          installed={installed}
+          onChanged={loadInstalled}
+        />
       )}
       {modsTab === 'installed' && (
         <InstalledTab
@@ -187,11 +193,13 @@ export default function Mods({
 function CatalogTab({
   instance,
   enabled,
-  onInstalled,
+  installed,
+  onChanged,
 }: {
   instance: Instance
   enabled: boolean
-  onInstalled: () => void
+  installed: ModInfo[]
+  onChanged: () => void
 }) {
   const { toast } = useApp()
   const [query, setQuery] = useState('')
@@ -200,6 +208,7 @@ function CatalogTab({
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [installing, setInstalling] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const requestRef = useRef(0)
 
   const load = useCallback(
@@ -238,11 +247,25 @@ function CatalogTab({
     try {
       await api.mods.install(instance.id, hit.project_id)
       toast(`«${hit.title}» установлен`, 'ok')
-      onInstalled()
+      onChanged()
     } catch (e) {
       toast(errText(e), 'err')
     } finally {
       setInstalling(null)
+    }
+  }
+
+  const remove = async (hit: MrSearchHit, mod: ModInfo) => {
+    if (removing) return
+    setRemoving(hit.project_id)
+    try {
+      await api.mods.remove(instance.id, mod.file)
+      toast(`«${hit.title}» удалён`, 'ok')
+      onChanged()
+    } catch (e) {
+      toast(errText(e), 'err')
+    } finally {
+      setRemoving(null)
     }
   }
 
@@ -273,36 +296,57 @@ function CatalogTab({
       ) : (
         <>
           <div className="project-grid">
-            {hits.map((hit) => (
-              <Card key={hit.project_id} className="project-card card-hover">
-                <div className="project-top">
-                  <RemoteIcon src={hit.icon_url} fallback={hit.title} size={46} />
-                  <div className="grow">
-                    <div className="project-title">{hit.title}</div>
-                    <div className="project-author">от {hit.author}</div>
+            {hits.map((hit) => {
+              const local = findInstalledContent(hit, installed)
+              return (
+                <Card
+                  key={hit.project_id}
+                  className={cx('project-card card-hover', local ? 'installed' : undefined)}
+                >
+                  <div className="project-top">
+                    <RemoteIcon src={hit.icon_url} fallback={hit.title} size={46} />
+                    <div className="grow">
+                      <div className="project-title">{hit.title}</div>
+                      <div className="project-author">от {hit.author}</div>
+                    </div>
                   </div>
-                </div>
-                <div className="project-desc">{hit.description}</div>
-                <div className="project-foot">
-                  <span className="project-stats">
-                    <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
-                  </span>
-                  {(hit.display_categories ?? hit.categories).slice(0, 2).map((c) => (
-                    <Badge key={c}>{c}</Badge>
-                  ))}
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    icon="download"
-                    disabled={!enabled}
-                    loading={installing === hit.project_id}
-                    onClick={() => install(hit)}
-                  >
-                    Установить
-                  </Button>
-                </div>
-              </Card>
-            ))}
+                  <div className="project-desc">{hit.description}</div>
+                  <div className="project-foot">
+                    <span className="project-stats">
+                      <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
+                    </span>
+                    {(hit.display_categories ?? hit.categories).slice(0, 2).map((c) => (
+                      <Badge key={c}>{c}</Badge>
+                    ))}
+                    {local ? (
+                      <>
+                        <Badge tone="green">Скачано</Badge>
+                        <div className="project-actions">
+                          <ConfirmButton
+                            size="sm"
+                            confirmText="Удалить?"
+                            onConfirm={() => void remove(hit, local)}
+                          >
+                            Удалить
+                          </ConfirmButton>
+                        </div>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon="download"
+                        disabled={!enabled}
+                        loading={installing === hit.project_id}
+                        onClick={() => install(hit)}
+                      >
+                        Установить
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              )
+            })}
           </div>
           {hits.length < total && (
             <div className="load-more">
@@ -682,32 +726,53 @@ function AssetTab({ instance, kind }: { instance: Instance; kind: 'resourcepack'
           ) : (
             <>
               <div className="project-grid">
-                {hits.map((hit) => (
-                  <Card key={hit.project_id} className="project-card card-hover">
-                    <div className="project-top">
-                      <RemoteIcon src={hit.icon_url} fallback={hit.title} size={46} />
-                      <div className="grow">
-                        <div className="project-title">{hit.title}</div>
-                        <div className="project-author">от {hit.author}</div>
+                {hits.map((hit) => {
+                  const local = findInstalledContent(hit, installed)
+                  return (
+                    <Card
+                      key={hit.project_id}
+                      className={cx('project-card card-hover', local ? 'installed' : undefined)}
+                    >
+                      <div className="project-top">
+                        <RemoteIcon src={hit.icon_url} fallback={hit.title} size={46} />
+                        <div className="grow">
+                          <div className="project-title">{hit.title}</div>
+                          <div className="project-author">от {hit.author}</div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="project-desc">{hit.description}</div>
-                    <div className="project-foot">
-                      <span className="project-stats">
-                        <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        icon="download"
-                        loading={installing === hit.project_id}
-                        onClick={() => install(hit)}
-                      >
-                        Установить
-                      </Button>
-                    </div>
-                  </Card>
-                ))}
+                      <div className="project-desc">{hit.description}</div>
+                      <div className="project-foot">
+                        <span className="project-stats">
+                          <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
+                        </span>
+                        {local ? (
+                          <>
+                            <Badge tone="green">Скачано</Badge>
+                            <div className="project-actions">
+                              <ConfirmButton
+                                size="sm"
+                                confirmText="Удалить?"
+                                onConfirm={() => remove(local)}
+                              >
+                                Удалить
+                              </ConfirmButton>
+                            </div>
+                          </>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            icon="download"
+                            loading={installing === hit.project_id}
+                            onClick={() => install(hit)}
+                          >
+                            Установить
+                          </Button>
+                        )}
+                      </div>
+                    </Card>
+                  )
+                })}
               </div>
               {hits.length > 0 && (
                 <div className="load-more">

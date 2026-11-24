@@ -285,6 +285,8 @@ export interface ModInfo {
   description: string
   enabled: boolean
   size: number
+  /** id проекта Modrinth, если файл скачан через лаунчер */
+  projectId?: string
   iconUrl?: string | null
 }
 

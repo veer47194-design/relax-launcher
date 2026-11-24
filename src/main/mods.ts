@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ContentKind, Instance, ModInfo, OptimizeMod } from '../shared/types'
 import { config, ensureInstanceDirs } from './config'
+import { contentProjectMap, forgetContent, rememberContent } from './content-manifest'
 import { ensureDir, exists, safeJoin } from './fsutil'
 import { downloadFile, mapLimit } from './http'
 import { getProject, getVersions, pickFile } from './modrinth'
@@ -124,6 +125,7 @@ export async function listMods(instanceId: string, kind: ContentKind = 'mod'): P
   const dir = contentDir(instanceId, kind)
   await ensureDir(dir)
   const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  const projects = await contentProjectMap(instanceId, kind)
   const mods: ModInfo[] = []
   for (const entry of entries) {
     if (!entry.isFile()) continue
@@ -146,6 +148,7 @@ export async function listMods(instanceId: string, kind: ContentKind = 'mod'): P
       description: typeof meta?.description === 'string' ? meta.description : '',
       enabled,
       size: stat.size,
+      projectId: projects.get(entry.name.replace(/\.disabled$/i, '')),
       iconUrl: iconEntry
         ? `relax-mod-icon://local/${encodeURIComponent(instanceId)}/${encodeURIComponent(entry.name)}/${encodeURIComponent(iconEntry)}`
         : null,
@@ -181,6 +184,7 @@ export async function removeMod(
 ): Promise<void> {
   const target = safeJoin(contentDir(instanceId, kind), file)
   await fs.promises.rm(target, { force: true })
+  await forgetContent(instanceId, kind, file)
 }
 
 async function installModFile(
@@ -227,6 +231,7 @@ async function installModFile(
     await downloadFile(file.url, dest, { sha1: file.hashes.sha1, size: file.size })
     installed.push(project.title)
   }
+  await rememberContent(instance.id, kind, project.id, filename, project.title)
 
   // Зависимости имеют смысл только у модов; у паков и шейдеров их нет.
   if (kind !== 'mod') return

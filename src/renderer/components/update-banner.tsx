@@ -81,6 +81,19 @@ export function UpdateBanner() {
     }
   }
 
+  /** Один клик: скачать установщик и сразу запустить обновление. */
+  const update = async () => {
+    setBusy(true)
+    try {
+      await api.update.download()
+      toast('Лаунчер закроется и запустит установщик', 'info')
+      await api.update.install()
+    } catch (e) {
+      setBusy(false)
+      toast(errText(e), 'err')
+    }
+  }
+
   return (
     <div className="update-banner">
       <div className="update-banner-head">
@@ -117,8 +130,14 @@ export function UpdateBanner() {
             Перезапустить и установить
           </button>
         ) : (
-          <button className="btn btn-primary btn-sm" onClick={download} disabled={busy}>
-            {busy ? 'Скачивание…' : 'Скачать обновление'}
+          <button className="btn btn-primary btn-sm" onClick={update} disabled={busy}>
+            <Icon name="refresh" size={13} />
+            {busy ? 'Скачивание…' : 'Обновить'}
+          </button>
+        )}
+        {!ready && (
+          <button className="btn btn-ghost btn-sm" onClick={download} disabled={busy}>
+            Только скачать
           </button>
         )}
         <button className="btn btn-ghost btn-sm" onClick={() => api.update.openRelease()}>

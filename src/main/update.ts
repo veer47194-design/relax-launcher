@@ -11,6 +11,8 @@ import { broadcast } from './progress'
 
 const REPO = 'veer47194-design/relax-launcher'
 const CHECK_TTL = 6 * 60 * 60 * 1000
+/** Если обновления нет, перепроверяем чаще: новый релиз должен появиться быстро. */
+const NO_UPDATE_TTL = 30 * 60 * 1000
 const RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`
 
 interface CacheFile {
@@ -49,6 +51,13 @@ function writeCache(info: UpdateInfo): void {
   } catch {
     /* кеш не критичен */
   }
+}
+
+/** Кеш «обновлений нет» живёт меньше, а смена версии лаунчера сбрасывает его сразу. */
+function cacheIsFresh(cached: CacheFile, current: string): boolean {
+  if (cached.info.current !== current) return false
+  const ttl = cached.info.available ? CHECK_TTL : NO_UPDATE_TTL
+  return Date.now() - cached.at < ttl
 }
 
 function parts(version: string): number[] {
@@ -94,7 +103,7 @@ function assetOf(release: GitHubRelease): { name: string; url: string; size: num
 export async function checkForUpdate(force = false): Promise<UpdateInfo> {
   const current = app.getVersion()
   const cached = readCache()
-  if (!force && cached && Date.now() - cached.at < CHECK_TTL) return cached.info
+  if (!force && cached && cacheIsFresh(cached, current)) return cached.info
 
   try {
     const release = await fetchJson<GitHubRelease>(RELEASE_API, {
@@ -201,14 +210,37 @@ export async function downloadUpdate(): Promise<{ path: string }> {
 /** Запускает скачанный установщик и закрывает лаунчер, чтобы тот заменил файлы. */
 export async function installUpdate(): Promise<void> {
   if (!downloaded) throw new Error('Сначала скачайте обновление')
-  if (!(await fileSize(downloaded.path)) || (await fileSize(downloaded.path)) <= 0) {
+  const size = await fileSize(downloaded.path)
+  if (!size || size <= 0) {
     downloaded = null
     throw new Error('Файл обновления пропал — скачайте заново')
   }
   const child = spawn(downloaded.path, [], { detached: true, stdio: 'ignore', windowsHide: false })
-  child.on('error', (e) => console.error('[update] installer', e))
+  // Не закрываем лаунчер, если установщик не запустился: пользователь останется
+  // с работающим окном и сможет повторить установку.
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      child.off('spawn', onSpawn)
+      child.off('error', onError)
+    }
+    const onSpawn = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = (e: Error) => {
+      cleanup()
+      reject(new Error(`Не удалось запустить установщик: ${e.message}`))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error('Установщик не запустился — попробуйте ещё раз'))
+    }, 10000)
+    child.once('spawn', onSpawn)
+    child.once('error', onError)
+  })
   child.unref()
-  setTimeout(() => app.quit(), 700)
+  setTimeout(() => app.quit(), 1200)
 }
 
 export function openReleasePage(): Promise<void> {

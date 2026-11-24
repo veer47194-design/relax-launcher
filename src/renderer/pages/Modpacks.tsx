@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmButton,
   EmptyState,
   Icon,
   PageHeader,
@@ -13,10 +14,11 @@ import {
   SearchInput,
   Select,
   SpinnerBlock,
+  cx,
 } from '../ui'
 
 export default function Modpacks() {
-  const { toast, refresh, selectInstance, go } = useApp()
+  const { state, toast, refresh, selectInstance, go } = useApp()
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'downloads' | 'newest' | 'updated'>('downloads')
   const [loader, setLoader] = useState<'' | 'fabric' | 'forge'>('')
@@ -24,6 +26,7 @@ export default function Modpacks() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [installing, setInstalling] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const requestRef = useRef(0)
 
@@ -69,6 +72,28 @@ export default function Modpacks() {
       toast(errText(e), 'err')
     } finally {
       setInstalling(null)
+    }
+  }
+
+  const installedFor = (hit: MrSearchHit) =>
+    state.instances.find((i) => i.modpack?.projectId === hit.project_id)
+
+  const open = (instanceId: string) => {
+    selectInstance(instanceId)
+    go('instances')
+  }
+
+  const remove = async (hit: MrSearchHit, instanceId: string, name: string) => {
+    if (removing) return
+    setRemoving(hit.project_id)
+    try {
+      await api.instances.remove(instanceId)
+      await refresh()
+      toast(`Сборка «${name}» удалена`, 'ok')
+    } catch (e) {
+      toast(errText(e), 'err')
+    } finally {
+      setRemoving(null)
     }
   }
 
@@ -140,41 +165,65 @@ export default function Modpacks() {
       ) : (
         <>
           <div className="project-grid">
-            {hits.map((hit) => (
-              <Card key={hit.project_id} className="project-card card-hover">
-                <div className="project-top">
-                  <RemoteIcon src={hit.icon_url} fallback={hit.title} size={56} radius={14} />
-                  <div className="grow">
-                    <div className="project-title" style={{ fontSize: 15 }}>
-                      {hit.title}
-                    </div>
-                    <div className="project-author">от {hit.author}</div>
-                    <div className="row" style={{ gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
-                      {(hit.display_categories ?? hit.categories).slice(0, 3).map((c) => (
-                        <Badge key={c}>{c}</Badge>
-                      ))}
+            {hits.map((hit) => {
+              const local = installedFor(hit)
+              return (
+                <Card
+                  key={hit.project_id}
+                  className={cx('project-card card-hover', local ? 'installed' : undefined)}
+                >
+                  <div className="project-top">
+                    <RemoteIcon src={hit.icon_url} fallback={hit.title} size={56} radius={14} />
+                    <div className="grow">
+                      <div className="project-title" style={{ fontSize: 15 }}>
+                        {hit.title}
+                      </div>
+                      <div className="project-author">от {hit.author}</div>
+                      <div className="row" style={{ gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
+                        {(hit.display_categories ?? hit.categories).slice(0, 3).map((c) => (
+                          <Badge key={c}>{c}</Badge>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="project-desc" style={{ minHeight: 50, WebkitLineClamp: 3 }}>
-                  {hit.description}
-                </div>
-                <div className="project-foot">
-                  <span className="project-stats">
-                    <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    icon="download"
-                    loading={installing === hit.project_id}
-                    onClick={() => install(hit)}
-                  >
-                    Установить
-                  </Button>
-                </div>
-              </Card>
-            ))}
+                  <div className="project-desc" style={{ minHeight: 50, WebkitLineClamp: 3 }}>
+                    {hit.description}
+                  </div>
+                  <div className="project-foot">
+                    <span className="project-stats">
+                      <Icon name="download" size={13} /> {fmtNumber(hit.downloads)}
+                    </span>
+                    {local ? (
+                      <>
+                        <Badge tone="green">Скачано</Badge>
+                        <div className="project-actions">
+                          <Button size="sm" variant="soft" icon="arrowRight" onClick={() => open(local.id)}>
+                            Открыть
+                          </Button>
+                          <ConfirmButton
+                            size="sm"
+                            confirmText="Удалить?"
+                            onConfirm={() => void remove(hit, local.id, local.name)}
+                          >
+                            Удалить
+                          </ConfirmButton>
+                        </div>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon="download"
+                        loading={installing === hit.project_id}
+                        onClick={() => install(hit)}
+                      >
+                        Установить
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              )
+            })}
           </div>
           {hits.length < total && (
             <div className="load-more">

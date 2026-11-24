@@ -13,6 +13,7 @@ import type {
 import { clearBackgroundFile, importBackground } from './background'
 import { getCacheInfo, clearCache } from './cache'
 import { config, ensureInstanceDirs } from './config'
+import { forgetInstanceContent } from './content-manifest'
 import { analyzeCrash } from './crash'
 import { dirSize } from './dirsize'
 import { beginDownload, DownloadAbortedError, endDownload, getDownload } from './downloads'
@@ -250,6 +251,7 @@ export function registerIpc() {
     config().getInstance(instanceId)
     if (launcher.isRunning(instanceId)) throw new Error('Сначала остановите игру')
     const state = config().removeInstance(instanceId)
+    forgetInstanceContent(instanceId)
     await fs.promises.rm(p.instance(instanceId), { recursive: true, force: true }).catch(() => {})
     broadcast('state', state)
     return state
