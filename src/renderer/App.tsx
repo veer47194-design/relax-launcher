@@ -1,20 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppState, ProgressEvent } from '../shared/types'
 import { api, cx, errText } from './api'
 import { AppContext, useApp, type ModsTab, type Page, type ToastItem, type ToastKind } from './context'
 import { applyAppearance } from './theme'
 import { Head, Icon, LogoMark, ProgressBar, Spinner } from './ui'
 import { WelcomeScreen } from './components/welcome'
+import { UpdateBanner } from './components/update-banner'
 import Home from './pages/Home'
-import Instances from './pages/Instances'
-import Versions from './pages/Versions'
-import Mods from './pages/Mods'
-import Modpacks from './pages/Modpacks'
-import Accounts from './pages/Accounts'
-import Downloads from './pages/Downloads'
-import SettingsPage from './pages/Settings'
-import Screenshots from './pages/Screenshots'
-import ConsolePage from './pages/Console'
+const Instances = lazy(() => import('./pages/Instances'))
+const Versions = lazy(() => import('./pages/Versions'))
+const Mods = lazy(() => import('./pages/Mods'))
+const Modpacks = lazy(() => import('./pages/Modpacks'))
+const Accounts = lazy(() => import('./pages/Accounts'))
+const Downloads = lazy(() => import('./pages/Downloads'))
+const SettingsPage = lazy(() => import('./pages/Settings'))
+const Screenshots = lazy(() => import('./pages/Screenshots'))
+const ConsolePage = lazy(() => import('./pages/Console'))
 
 const NAV: { group: string; items: { page: Page; label: string; icon: Parameters<typeof Icon>[0]['name'] }[] }[] = [
   {
@@ -60,10 +61,13 @@ export default function App() {
   const [importing, setImporting] = useState(false)
   const [pausedDownloads, setPausedDownloads] = useState<Set<string>>(new Set())
   const [welcome, setWelcome] = useState(true)
+  const [warningHidden, setWarningHidden] = useState(false)
 
   const contentRef = useRef<HTMLDivElement | null>(null)
   const toastId = useRef(0)
   const handledProgress = useRef<Set<string>>(new Set())
+  const pendingProgress = useRef<ProgressEvent | null>(null)
+  const rafRef = useRef<number | null>(null)
   const stateRef = useRef<AppState | null>(null)
   const dragDepth = useRef(0)
 
@@ -142,21 +146,35 @@ export default function App() {
       })
     })
     const offProgress = api.on.progress((event) => {
-      setProgress(event)
-      if (!event.done) return
-      if (event.error) {
-        if (!handledProgress.current.has(event.id)) {
-          handledProgress.current.add(event.id)
-          toast(event.error, 'err')
+      if (event.done) {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current)
+          rafRef.current = null
         }
-        window.setTimeout(() => {
-          setProgress((current) => (current?.id === event.id ? null : current))
-        }, 10000)
-      } else {
-        window.setTimeout(() => {
-          setProgress((current) => (current?.id === event.id ? null : current))
-        }, 2400)
+        pendingProgress.current = null
+        setProgress(event)
+        if (event.error) {
+          if (!handledProgress.current.has(event.id)) {
+            handledProgress.current.add(event.id)
+            toast(event.error, 'err')
+          }
+          window.setTimeout(() => {
+            setProgress((current) => (current?.id === event.id ? null : current))
+          }, 10000)
+        } else {
+          window.setTimeout(() => {
+            setProgress((current) => (current?.id === event.id ? null : current))
+          }, 2400)
+        }
+        return
       }
+      // Прогресс приходит очень часто — обновляем интерфейс не чаще одного кадра.
+      pendingProgress.current = event
+      if (rafRef.current !== null) return
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null
+        if (pendingProgress.current) setProgress(pendingProgress.current)
+      })
     })
     const offLog = api.on.exit((event) => {
       setRunning((prev) => {
@@ -180,6 +198,8 @@ export default function App() {
       offDownload()
       offProgress()
       offLog()
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
     }
   }, [applyState, load, toast])
 
@@ -439,19 +459,30 @@ export default function App() {
           <Sidebar />
           <main className="content" ref={contentRef}>
             <div className="content-inner">
+              {state.warning && !warningHidden && (
+                <div className="config-warning">
+                  <Icon name="alert" size={15} />
+                  <div className="grow">{state.warning}</div>
+                  <button className="icon-btn" onClick={() => setWarningHidden(true)} aria-label="Скрыть">
+                    <Icon name="x" size={13} />
+                  </button>
+                </div>
+              )}
               <div className="page-stage" key={page}>
-                {page === 'home' && <Home />}
-                {page === 'instances' && <Instances />}
-                {page === 'versions' && <Versions />}
-                {page === 'mods' && <Mods title="Моды" initialTab="catalog" />}
-                {page === 'modpacks' && <Modpacks />}
-                {page === 'resourcepacks' && <Mods title="Ресурс-паки" initialTab="resourcepacks" />}
-                {page === 'shaders' && <Mods title="Шейдеры" initialTab="shaders" />}
-                {page === 'accounts' && <Accounts />}
-                {page === 'screenshots' && <Screenshots />}
-                {page === 'downloads' && <Downloads />}
-                {page === 'settings' && <SettingsPage />}
-                {page === 'console' && <ConsolePage />}
+                <Suspense fallback={<div className="page-loading"><Spinner size={18} /> Загрузка раздела…</div>}>
+                  {page === 'home' && <Home />}
+                  {page === 'instances' && <Instances />}
+                  {page === 'versions' && <Versions />}
+                  {page === 'mods' && <Mods title="Моды" initialTab="catalog" />}
+                  {page === 'modpacks' && <Modpacks />}
+                  {page === 'resourcepacks' && <Mods title="Ресурс-паки" initialTab="resourcepacks" />}
+                  {page === 'shaders' && <Mods title="Шейдеры" initialTab="shaders" />}
+                  {page === 'accounts' && <Accounts />}
+                  {page === 'screenshots' && <Screenshots />}
+                  {page === 'downloads' && <Downloads />}
+                  {page === 'settings' && <SettingsPage />}
+                  {page === 'console' && <ConsolePage />}
+                </Suspense>
               </div>
             </div>
           </main>
@@ -510,6 +541,8 @@ export default function App() {
             onClose={() => setProgress(null)}
           />
         )}
+
+        <UpdateBanner />
       </div>
     </AppContext.Provider>
   )
@@ -541,6 +574,13 @@ function TitleBar() {
 
 function Sidebar() {
   const { state, page, go, running, openConsole, instance } = useApp()
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    api.app
+      .info()
+      .then((info) => setVersion(info.version))
+      .catch(() => {})
+  }, [])
   const account = state.accounts.find((a) => a.id === state.settings.activeAccountId) ?? state.accounts[0]
   return (
     <aside className="sidebar">
@@ -605,6 +645,7 @@ function Sidebar() {
           )}
         </button>
         {instance && <div className="tiny" style={{ padding: '8px 10px 0' }}>Сборка: {instance.name}</div>}
+        {version && <div className="sidebar-version">Relax Launcher v{version}</div>}
       </div>
     </aside>
   )

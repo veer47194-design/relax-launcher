@@ -1,0 +1,222 @@
+import { app, shell } from 'electron'
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { UpdateInfo, UpdateProgress } from '../shared/types'
+import { ensureDir, fileSize } from './fsutil'
+import { fetchJson, USER_AGENT } from './http'
+import { broadcast } from './progress'
+
+const REPO = 'veer47194-design/relax-launcher'
+const CHECK_TTL = 6 * 60 * 60 * 1000
+const RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`
+
+interface CacheFile {
+  at: number
+  info: UpdateInfo
+}
+
+let memoryCache: CacheFile | null = null
+let pending: UpdateInfo | null = null
+let downloaded: { path: string; version: string } | null = null
+let downloading = false
+
+function cachePath(): string {
+  return path.join(app.getPath('userData'), 'update-cache.json')
+}
+
+function readCache(): CacheFile | null {
+  if (memoryCache) return memoryCache
+  try {
+    const raw = JSON.parse(fs.readFileSync(cachePath(), 'utf8')) as CacheFile
+    if (raw && raw.info && typeof raw.at === 'number') {
+      memoryCache = raw
+      return raw
+    }
+  } catch {
+    /* кеша нет — не страшно */
+  }
+  return null
+}
+
+function writeCache(info: UpdateInfo): void {
+  memoryCache = { at: Date.now(), info }
+  try {
+    fs.mkdirSync(path.dirname(cachePath()), { recursive: true })
+    fs.writeFileSync(cachePath(), JSON.stringify(memoryCache), 'utf8')
+  } catch {
+    /* кеш не критичен */
+  }
+}
+
+function parts(version: string): number[] {
+  return String(version)
+    .replace(/^v/i, '')
+    .split(/[.+-]/)
+    .map((x) => Number.parseInt(x, 10))
+    .map((x) => (Number.isFinite(x) ? x : 0))
+}
+
+/** Сравнивает версии по числовым сегментам: 0.1.10 > 0.1.9. */
+export function compareVersions(a: string, b: string): number {
+  const left = parts(a)
+  const right = parts(b)
+  const length = Math.max(left.length, right.length)
+  for (let i = 0; i < length; i++) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0)
+    if (diff !== 0) return diff > 0 ? 1 : -1
+  }
+  return 0
+}
+
+interface GitHubRelease {
+  tag_name?: string
+  name?: string
+  body?: string
+  html_url?: string
+  published_at?: string
+  prerelease?: boolean
+  draft?: boolean
+  assets?: { name: string; browser_download_url: string; size: number }[]
+}
+
+function assetOf(release: GitHubRelease): { name: string; url: string; size: number } | null {
+  const assets = release.assets ?? []
+  const setup = assets.find((a) => /^Relax-Launcher-Setup-.*\.exe$/i.test(a.name))
+  const anyExe = assets.find((a) => /\.exe$/i.test(a.name) && !/\.blockmap$/i.test(a.name))
+  const picked = setup ?? anyExe
+  if (!picked) return null
+  return { name: picked.name, url: picked.browser_download_url, size: picked.size }
+}
+
+export async function checkForUpdate(force = false): Promise<UpdateInfo> {
+  const current = app.getVersion()
+  const cached = readCache()
+  if (!force && cached && Date.now() - cached.at < CHECK_TTL) return cached.info
+
+  try {
+    const release = await fetchJson<GitHubRelease>(RELEASE_API, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/vnd.github+json' },
+      timeoutMs: 15000,
+      retries: 1,
+    })
+    const version = String(release.tag_name ?? release.name ?? '').replace(/^v/i, '')
+    if (!version) throw new Error('GitHub не вернул версию релиза')
+    const asset = assetOf(release)
+    const info: UpdateInfo = {
+      available: !release.prerelease && !release.draft && compareVersions(version, current) > 0,
+      current,
+      version,
+      notes: release.body?.slice(0, 4000) ?? '',
+      pageUrl: release.html_url ?? `https://github.com/${REPO}/releases`,
+      assetName: asset?.name,
+      assetUrl: asset?.url,
+      size: asset?.size,
+      publishedAt: release.published_at,
+    }
+    pending = info.available ? info : null
+    writeCache(info)
+    return info
+  } catch (e) {
+    const message = (e as Error).message
+    return {
+      available: false,
+      current,
+      error: /rate limit/i.test(message) ? 'GitHub временно ограничил проверку обновлений' : message,
+    }
+  }
+}
+
+export async function downloadUpdate(): Promise<{ path: string }> {
+  if (downloading) throw new Error('Обновление уже скачивается')
+  const info = pending ?? (await checkForUpdate(true))
+  if (!info.available || !info.assetUrl || !info.assetName) {
+    throw new Error('Обновление не найдено')
+  }
+  if (downloaded && downloaded.version === info.version) {
+    const size = await fileSize(downloaded.path)
+    if (size > 0) return { path: downloaded.path }
+  }
+
+  const dir = path.join(app.getPath('temp'), 'relax-launcher-update')
+  await ensureDir(dir)
+  const dest = path.join(dir, info.assetName)
+  const tmp = `${dest}.part`
+  const version = info.version ?? '0.0.0'
+
+  downloading = true
+  const report = (progress: UpdateProgress) => broadcast('update:progress', progress)
+  try {
+    report({ phase: 'download', received: 0, total: info.size ?? 0, percent: 0, version })
+    const res = await fetch(info.assetUrl, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/octet-stream' },
+      signal: AbortSignal.timeout(30 * 60 * 1000),
+    })
+    if (!res.ok || !res.body) throw new Error(`GitHub ответил ${res.status} ${res.statusText}`)
+
+    const total = Number(res.headers.get('content-length')) || info.size || 0
+    let received = 0
+    let lastEmit = 0
+    const stream = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0])
+    stream.on('data', (chunk: Buffer) => {
+      received += chunk.length
+      const now = Date.now()
+      if (now - lastEmit < 120 && received !== total) return
+      lastEmit = now
+      report({
+        phase: 'download',
+        received,
+        total,
+        percent: total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0,
+        version,
+      })
+    })
+    await pipeline(stream, fs.createWriteStream(tmp))
+    if (total > 0 && received !== total) {
+      throw new Error(`Файл скачался не полностью: ${received} из ${total} байт`)
+    }
+    await fs.promises.rm(dest, { force: true }).catch(() => {})
+    await fs.promises.rename(tmp, dest)
+    downloaded = { path: dest, version }
+    report({ phase: 'ready', received, total, percent: 100, version, path: dest })
+    return { path: dest }
+  } catch (e) {
+    await fs.promises.rm(tmp, { force: true }).catch(() => {})
+    report({
+      phase: 'error',
+      received: 0,
+      total: info.size ?? 0,
+      percent: 0,
+      version,
+      error: (e as Error).message,
+    })
+    throw e
+  } finally {
+    downloading = false
+  }
+}
+
+/** Запускает скачанный установщик и закрывает лаунчер, чтобы тот заменил файлы. */
+export async function installUpdate(): Promise<void> {
+  if (!downloaded) throw new Error('Сначала скачайте обновление')
+  if (!(await fileSize(downloaded.path)) || (await fileSize(downloaded.path)) <= 0) {
+    downloaded = null
+    throw new Error('Файл обновления пропал — скачайте заново')
+  }
+  const child = spawn(downloaded.path, [], { detached: true, stdio: 'ignore', windowsHide: false })
+  child.on('error', (e) => console.error('[update] installer', e))
+  child.unref()
+  setTimeout(() => app.quit(), 700)
+}
+
+export function openReleasePage(): Promise<void> {
+  const url = pending?.pageUrl ?? `https://github.com/${REPO}/releases`
+  return shell.openExternal(url)
+}
+
+/** Проверка в фоне при старте: рендерер сам покажет баннер, если обновление есть. */
+export function startBackgroundCheck(): void {
+  void checkForUpdate(false).catch(() => {})
+}

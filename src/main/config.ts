@@ -46,6 +46,7 @@ export function defaultSettings(): Settings {
     fontSize: 14,
     fontFamily: 'default',
     reduceMotion: false,
+    autoUpdate: true,
   }
 }
 
@@ -85,6 +86,7 @@ class ConfigStore {
   private data: ConfigData
   private timer: NodeJS.Timeout | null = null
   private readonly file: string
+  warning: string | null = null
 
   constructor() {
     this.file = path.join(configDir(), 'config.json')
@@ -98,6 +100,11 @@ class ConfigStore {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<ConfigData>
       const settings = { ...defaults.settings, ...(raw.settings ?? {}) }
       settings.resolution = { ...defaults.settings.resolution, ...(raw.settings?.resolution ?? {}) }
+      settings.memoryMb = clampMemory(settings.memoryMb)
+      const minMb = Math.round(Number(settings.minMemoryMb))
+      settings.minMemoryMb = Number.isFinite(minMb)
+        ? Math.max(256, Math.min(settings.memoryMb, minMb))
+        : Math.min(512, settings.memoryMb)
       return {
         settings,
         accounts: Array.isArray(raw.accounts)
@@ -105,14 +112,37 @@ class ConfigStore {
           : [],
         instances: Array.isArray(raw.instances) ? raw.instances.map((i) => ({ ...i, playtimeMs: i.playtimeMs ?? 0 })) : [],
       }
-    } catch {
+    } catch (e) {
+      // Повреждённый конфиг НЕ перезаписываем сразу: сначала сохраняем копию.
+      const backup = `${this.file}.bad-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      try {
+        if (fs.existsSync(this.file)) fs.copyFileSync(this.file, backup)
+      } catch {
+        /* копию сохранить не удалось — продолжаем с дефолтами */
+      }
+      this.warning = `Конфиг повреждён и сброшен. Резервная копия: ${backup}`
+      console.error('[config] не удалось прочитать конфиг', e)
       return defaults
     }
   }
 
   private applyRoot() {
-    setRoot(this.data.settings.rootDir)
-    fs.mkdirSync(this.data.settings.rootDir, { recursive: true })
+    const fallback = defaultSettings().rootDir
+    const target = this.data.settings.rootDir
+    try {
+      setRoot(target)
+      fs.mkdirSync(target, { recursive: true })
+    } catch (e) {
+      this.data.settings.rootDir = fallback
+      setRoot(fallback)
+      try {
+        fs.mkdirSync(fallback, { recursive: true })
+      } catch {
+        /* крайний случай — даже дефолтная папка недоступна */
+      }
+      this.warning = `Папка данных «${target}» недоступна — используется «${fallback}»`
+      console.error('[config] не удалось создать папку данных', e)
+    }
   }
 
   get(): ConfigData {
@@ -124,6 +154,7 @@ class ConfigStore {
       settings: this.data.settings,
       accounts: this.data.accounts,
       instances: this.data.instances,
+      warning: this.warning,
     }
   }
 
@@ -154,7 +185,8 @@ class ConfigStore {
     const next = { ...this.data.settings, ...patch }
     if (patch.resolution) next.resolution = { ...this.data.settings.resolution, ...patch.resolution }
     next.memoryMb = clampMemory(next.memoryMb)
-    next.minMemoryMb = Math.max(256, Math.min(next.memoryMb, Math.round(next.minMemoryMb)))
+    const minMb = Math.round(Number(next.minMemoryMb))
+    next.minMemoryMb = Number.isFinite(minMb) ? Math.max(256, Math.min(next.memoryMb, minMb)) : Math.min(512, next.memoryMb)
     next.downloadConcurrency = Math.max(1, Math.min(64, Math.round(next.downloadConcurrency)))
     if (!next.rootDir || typeof next.rootDir !== 'string') next.rootDir = defaultSettings().rootDir
     if (next.accentColor && !/^#[0-9a-f]{6}$/i.test(next.accentColor)) next.accentColor = null
@@ -185,6 +217,7 @@ class ConfigStore {
     next.fontSize = Number.isFinite(fontSize) ? Math.max(12, Math.min(18, fontSize)) : 14
     if (!['default', 'segoe', 'mono', 'serif'].includes(next.fontFamily)) next.fontFamily = 'default'
     next.reduceMotion = !!next.reduceMotion
+    next.autoUpdate = next.autoUpdate !== false
     const rootChanged = next.rootDir !== this.data.settings.rootDir
     this.data.settings = next
     if (rootChanged) this.applyRoot()

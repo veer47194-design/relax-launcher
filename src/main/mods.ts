@@ -129,7 +129,13 @@ export async function listMods(instanceId: string, kind: ContentKind = 'mod'): P
     if (!entry.isFile()) continue
     if (!/\.(jar|zip)(\.disabled)?$/i.test(entry.name)) continue
     const full = path.join(dir, entry.name)
-    const stat = await fs.promises.stat(full)
+    let stat: fs.Stats
+    try {
+      stat = await fs.promises.stat(full)
+    } catch {
+      // Файл удалили между readdir и stat — просто пропускаем, а не роняем весь список.
+      continue
+    }
     const meta = readModMeta(full)
     const iconEntry = modIconEntry(full, meta)
     const enabled = !entry.name.endsWith('.disabled')

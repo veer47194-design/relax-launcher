@@ -33,10 +33,13 @@ export async function fetchJson<T>(url: string, opts: JsonOptions = {}): Promise
   const { timeoutMs = 30000, retries = 2, headers = {}, signal } = opts
   let lastError: unknown
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const link = signal
+      ? linkSignals([signal, AbortSignal.timeout(timeoutMs)])
+      : { signal: AbortSignal.timeout(timeoutMs), dispose: () => {} }
     try {
       const res = await fetch(url, {
         headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...headers },
-        signal: signal ? anySignal([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
+        signal: link.signal,
       })
       if (!res.ok) {
         const body = await res.text().catch(() => '')
@@ -54,6 +57,8 @@ export async function fetchJson<T>(url: string, opts: JsonOptions = {}): Promise
       if (signal?.aborted) throw new DownloadAbortedError()
       lastError = e
       if (attempt < retries) await sleep(400 * (attempt + 1))
+    } finally {
+      link.dispose()
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError))
@@ -67,16 +72,51 @@ export interface DownloadOptions {
   controller?: DownloadController
 }
 
-function anySignal(signals: AbortSignal[]): AbortSignal {
+/**
+ * Объединяет сигналы отмены. Возвращает функцию отписки: без неё каждый файл
+ * оставлял слушателей на долгоживущем signal контроллера (утечка + MaxListeners).
+ */
+function linkSignals(signals: AbortSignal[]): { signal: AbortSignal; dispose: () => void } {
   const controller = new AbortController()
+  const cleanups: Array<() => void> = []
   for (const signal of signals) {
-    if (signal.aborted) controller.abort(signal.reason)
-    else signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true })
+    if (signal.aborted) {
+      controller.abort(signal.reason)
+      break
+    }
+    const onAbort = () => controller.abort(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    cleanups.push(() => signal.removeEventListener('abort', onAbort))
   }
-  return controller.signal
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      for (const cleanup of cleanups) cleanup()
+    },
+  }
+}
+
+/** Маркер проверенного файла: хеш записывается один раз после успешной проверки. */
+async function readHashMarker(dest: string): Promise<string | null> {
+  try {
+    const raw = await fs.promises.readFile(`${dest}.relax-sha1`, 'utf8')
+    return raw.trim() || null
+  } catch {
+    return null
+  }
+}
+
+async function writeHashMarker(dest: string, sha1: string): Promise<void> {
+  await fs.promises.writeFile(`${dest}.relax-sha1`, sha1, 'utf8').catch(() => {})
 }
 
 const inflight = new Map<string, Promise<void>>()
+let activeTransfers = 0
+
+/** Есть ли активные сетевые записи — очистка кеша не должна их удалять. */
+export function hasActiveTransfers(): boolean {
+  return activeTransfers > 0
+}
 
 /**
  * Скачивает файл с проверкой SHA-1 и повторами.
@@ -87,7 +127,11 @@ export function downloadFile(url: string, dest: string, opts: DownloadOptions = 
   const key = path.resolve(dest).toLowerCase()
   const running = inflight.get(key)
   if (running) return running
-  const task = downloadFileInner(url, dest, opts).finally(() => inflight.delete(key))
+  activeTransfers++
+  const task = downloadFileInner(url, dest, opts).finally(() => {
+    activeTransfers--
+    inflight.delete(key)
+  })
   inflight.set(key, task)
   return task
 }
@@ -100,19 +144,22 @@ async function downloadFileInner(url: string, dest: string, opts: DownloadOption
   if (sha1) {
     const actualSize = await fileSize(dest)
     if (actualSize >= 0) {
-      // Быстрая проверка: совпал размер — считаем файл целым (не читаем гигабайты с диска).
+      // Быстрый путь: совпал размер И есть маркер прошлой успешной проверки хеша.
       if (size && actualSize === size) {
-        onBytes?.(size, size)
-        return
-      }
-      // Размер неизвестен — проверяем хеш.
-      if (!size) {
-        const actual = await sha1File(dest)
-        if (actual === sha1) {
-          onBytes?.(actualSize, actualSize)
+        const marked = await readHashMarker(dest)
+        if (marked === sha1) {
+          onBytes?.(size, size)
           return
         }
       }
+      // Маркера нет (первый запуск после обновления) — считаем SHA-1 один раз.
+      const actual = await sha1File(dest)
+      if (actual === sha1) {
+        await writeHashMarker(dest, sha1)
+        onBytes?.(actualSize, actualSize)
+        return
+      }
+      await fs.promises.rm(`${dest}.relax-sha1`, { force: true }).catch(() => {})
     }
   } else if (await exists(dest)) {
     const actualSize = await fileSize(dest)
@@ -126,15 +173,18 @@ async function downloadFileInner(url: string, dest: string, opts: DownloadOption
   let lastError: unknown
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    let link: { signal: AbortSignal; dispose: () => void } | null = null
     try {
       await controller?.gate()
       await fs.promises.rm(tmp, { force: true })
-      const signal = controller
-        ? anySignal([controller.signal, AbortSignal.timeout(120000)])
-        : AbortSignal.timeout(120000)
+      // Таймаут на весь поток, а не только на заголовки: большие файлы на медленной сети
+      // не должны обрываться через 2 минуты.
+      link = controller
+        ? linkSignals([controller.signal, AbortSignal.timeout(900000)])
+        : { signal: AbortSignal.timeout(900000), dispose: () => {} }
       const res = await fetch(url, {
         headers: { 'User-Agent': USER_AGENT },
-        signal,
+        signal: link.signal,
       })
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status} ${res.statusText} — ${url}`)
@@ -160,12 +210,15 @@ async function downloadFileInner(url: string, dest: string, opts: DownloadOption
       await controller?.gate()
       if (controller?.aborted) throw new DownloadAbortedError()
       await fs.promises.rename(tmp, dest)
+      if (sha1) await writeHashMarker(dest, sha1)
       return
     } catch (e) {
       if (controller?.aborted || e instanceof DownloadAbortedError) throw new DownloadAbortedError()
       lastError = e
       await fs.promises.rm(tmp, { force: true }).catch(() => {})
       if (attempt < retries) await sleep(600 * (attempt + 1))
+    } finally {
+      link?.dispose()
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`Не удалось скачать ${url}`)
@@ -181,15 +234,28 @@ export async function mapLimit<T, R>(
   const results = new Array<R>(items.length)
   let index = 0
   let done = 0
+  let failed = false
+  let firstError: unknown
   const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (true) {
+    while (!failed) {
       const current = index++
       if (current >= items.length) return
-      results[current] = await fn(items[current], current)
+      try {
+        results[current] = await fn(items[current], current)
+      } catch (e) {
+        // Не бросаем сразу: даём остальным воркерам завершить текущие файлы,
+        // иначе удаление папки сборки гоняется с незакрытыми записями.
+        if (!failed) {
+          failed = true
+          firstError = e
+        }
+        return
+      }
       done++
       onProgress?.(done, items.length)
     }
   })
-  await Promise.all(workers)
+  await Promise.allSettled(workers)
+  if (failed) throw firstError instanceof Error ? firstError : new Error(String(firstError))
   return results
 }

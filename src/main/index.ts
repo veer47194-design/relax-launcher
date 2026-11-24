@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, Menu, net, protocol, shell, dialog } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -180,6 +180,18 @@ if (!gotLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+  }).catch((error) => {
+    // Без этого промиса окно не создавалось, а приложение молча висело в фоне.
+    console.error('[Relax] Не удалось запустить приложение:', error)
+    try {
+      dialog.showErrorBox(
+        'Relax Launcher не запустился',
+        `${(error as Error).message ?? error}\n\nПроверьте папку данных в настройках и права доступа, затем запустите лаунчер снова.`,
+      )
+    } catch {
+      /* диалог мог быть недоступен */
+    }
+    app.quit()
   })
 
   app.on('window-all-closed', () => {
@@ -196,6 +208,10 @@ if (!gotLock) {
 
   process.on('uncaughtException', (error) => {
     console.error('[Relax] Необработанная ошибка:', error)
+  })
+
+  process.on('unhandledRejection', (reason) => {
+    console.error('[Relax] Необработанный промис:', reason)
   })
 
   void launcher

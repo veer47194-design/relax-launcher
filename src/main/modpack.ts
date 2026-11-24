@@ -43,7 +43,27 @@ export interface ModpackSource {
   fallbackName?: string
 }
 
+let installing = 0
+
+/** Идёт ли установка сборки — очистка кеша не должна удалять её файлы. */
+export function isModpackInstalling(): boolean {
+  return installing > 0
+}
+
 async function installFromMrpack(
+  mrpackPath: string,
+  progress: Progress,
+  source: ModpackSource,
+): Promise<ModpackInstallResult> {
+  installing++
+  try {
+    return await installFromMrpackInner(mrpackPath, progress, source)
+  } finally {
+    installing--
+  }
+}
+
+async function installFromMrpackInner(
   mrpackPath: string,
   progress: Progress,
   source: ModpackSource,
@@ -56,7 +76,7 @@ async function installFromMrpack(
     progress.note('Чтение modrinth.index.json')
     let indexRaw = readZipFile(mrpackPath, 'modrinth.index.json')
     if (!indexRaw) {
-      const entry = listZip(mrpackPath).find((e) => e.name.endsWith('modrinth.index.json'))
+      const entry = (await listZip(mrpackPath)).find((e) => e.name.endsWith('modrinth.index.json'))
       if (entry) indexRaw = entry.data
     }
     if (!indexRaw) throw new Error('В архиве сборки нет modrinth.index.json — это не .mrpack?')
@@ -168,7 +188,7 @@ export async function installModpack(projectId: string): Promise<ModpackInstallR
     progress.note(`Скачивание «${project.title}»`)
     const cacheDir = path.join(p.cache(), 'modpacks')
     await ensureDir(cacheDir)
-    const safeSlug = (project.slug || project.id).replace(/[^a-z0-9._-]+/gi, '-')
+    const safeSlug = String(project.slug || project.id || 'modpack').replace(/[^a-z0-9._-]+/gi, '-')
     const mrpackPath = path.join(cacheDir, `${safeSlug}-${version.id}.mrpack`)
     await downloadFile(file.url, mrpackPath, { sha1: file.hashes.sha1, size: file.size })
 

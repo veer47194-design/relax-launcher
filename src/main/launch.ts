@@ -29,6 +29,7 @@ interface RunningProcess {
   child: ChildProcess
   startedAt: number
   instanceId: string
+  closeTimer?: NodeJS.Timeout
 }
 
 function gcFlags(preset: GcPreset, javaMajor: number): string[] {
@@ -322,6 +323,58 @@ export class Launcher {
       const startedAt = Date.now()
       const entry: RunningProcess = { child, startedAt, instanceId }
       this.running.set(instanceId, entry)
+      let finished = false
+
+      const finish = async (code: number | null, spawnError?: string) => {
+        if (finished) return
+        finished = true
+        if (entry.closeTimer) {
+          clearTimeout(entry.closeTimer)
+          entry.closeTimer = undefined
+        }
+        const exitAt = Date.now()
+        const durationMs = exitAt - startedAt
+        try {
+          logStream.end()
+        } catch {
+          /* поток мог быть уже закрыт */
+        }
+        this.running.delete(instanceId)
+        let event: ExitEvent
+        if (spawnError) {
+          event = { instanceId, code: -1, durationMs, hints: [spawnError], reason: spawnError }
+        } else {
+          const lines = (this.logs.get(instanceId) ?? []).map((l) => l.line)
+          const crash = code === 0 ? null : await analyzeCrash(instanceId, lines, startedAt, exitAt)
+          event = {
+            instanceId,
+            code,
+            durationMs,
+            hints: crash?.hints ?? [],
+            crashedAt: crash?.crashedAt,
+            reason: crash?.reason,
+            suspects: crash?.suspects,
+            reportFile: crash?.reportFile,
+          }
+        }
+        this.pushLog(instanceId, {
+          instanceId,
+          stream: 'system',
+          at: exitAt,
+          line: spawnError
+            ? `[Relax] ${spawnError}`
+            : `[Relax] Игра завершилась с кодом ${code ?? '—'} за ${Math.round(durationMs / 1000)} с${event.crashedAt ? ` · краш в ${new Date(event.crashedAt).toLocaleTimeString('ru-RU')}` : ''}`,
+        })
+        if (durationMs > 1000 || !spawnError) cfg.markPlayed(instanceId, durationMs)
+        broadcast('launch:exit', event)
+        broadcast('state', cfg.state())
+        if (cfg.get().settings.closeLauncherOnStart) {
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (win.isMinimized()) win.restore()
+            win.show()
+          }
+        }
+      }
 
       const makeHandler = (stream: 'stdout' | 'stderr') => {
         let buffer = ''
@@ -339,52 +392,41 @@ export class Launcher {
       child.stdout?.on('data', makeHandler('stdout'))
       child.stderr?.on('data', makeHandler('stderr'))
 
-      child.on('error', (err) => {
-        const message = `Не удалось запустить Java: ${err.message}`
-        this.pushLog(instanceId, { instanceId, stream: 'system', line: message, at: Date.now() })
-        progress.fail(message)
-        this.running.delete(instanceId)
+      // Ждём именно событие spawn: при ошибке (нет Java, PATH, доступ) Node не шлёт exit,
+      // и раньше лаунчер показывал «игра запущена», хотя процесс не создан.
+      const spawnError = await new Promise<string | null>((resolve) => {
+        const onSpawn = () => {
+          child.off('error', onError)
+          resolve(null)
+        }
+        const onError = (err: Error) => {
+          child.off('spawn', onSpawn)
+          resolve(`Не удалось запустить Java: ${err.message}`)
+        }
+        child.once('spawn', onSpawn)
+        child.once('error', onError)
       })
 
+      if (spawnError) {
+        progress.fail(spawnError)
+        this.pushLog(instanceId, { instanceId, stream: 'system', line: spawnError, at: Date.now() })
+        await finish(-1, spawnError)
+        throw new Error(spawnError)
+      }
+
+      child.on('error', (err) => {
+        const message = `Процесс игры завершился с ошибкой: ${err.message}`
+        progress.fail(message)
+        void finish(-1, message).catch((e) => console.error('[launch] finish', e))
+      })
       child.on('exit', (code) => {
-        void (async () => {
-          const exitAt = Date.now()
-          const durationMs = exitAt - startedAt
-          logStream.end()
-          this.running.delete(instanceId)
-          const lines = (this.logs.get(instanceId) ?? []).map((l) => l.line)
-          const crash = code === 0 ? null : await analyzeCrash(instanceId, lines, startedAt, exitAt)
-          const event: ExitEvent = {
-            instanceId,
-            code,
-            durationMs,
-            hints: crash?.hints ?? [],
-            crashedAt: crash?.crashedAt,
-            reason: crash?.reason,
-            suspects: crash?.suspects,
-            reportFile: crash?.reportFile,
-          }
-          this.pushLog(instanceId, {
-            instanceId,
-            stream: 'system',
-            at: exitAt,
-            line: `[Relax] Игра завершилась с кодом ${code ?? '—'} за ${Math.round(durationMs / 1000)} с${crash ? ` · краш в ${new Date(crash.crashedAt ?? exitAt).toLocaleTimeString('ru-RU')}` : ''}`,
-          })
-          cfg.markPlayed(instanceId, durationMs)
-          broadcast('launch:exit', event)
-          broadcast('state', cfg.state())
-          if (cfg.get().settings.closeLauncherOnStart) {
-            for (const win of BrowserWindow.getAllWindows()) {
-              if (win.isMinimized()) win.restore()
-              win.show()
-            }
-          }
-        })()
+        void finish(code).catch((e) => console.error('[launch] finish', e))
       })
 
       progress.done('Игра запущена')
       if (settings.closeLauncherOnStart) {
-        setTimeout(() => {
+        entry.closeTimer = setTimeout(() => {
+          entry.closeTimer = undefined
           for (const win of BrowserWindow.getAllWindows()) win.minimize()
         }, 1200)
       }
@@ -403,7 +445,8 @@ export class Launcher {
     const pid = entry.child.pid
     if (pid) {
       if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(pid), '/f', '/t'], { windowsHide: true })
+        const killer = spawn('taskkill', ['/pid', String(pid), '/f', '/t'], { windowsHide: true })
+        killer.on('error', (e) => console.error('[launch] taskkill', e))
       } else {
         entry.child.kill('SIGTERM')
       }

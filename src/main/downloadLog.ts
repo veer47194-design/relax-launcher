@@ -8,9 +8,31 @@ function snapshot(): DownloadRecord[] {
   return records.map((record) => ({ ...record }))
 }
 
-function notify() {
+let notifyTimer: NodeJS.Timeout | null = null
+let dirty = false
+
+function flush() {
+  dirty = false
   const data = snapshot()
   for (const listener of listeners) listener(data)
+}
+
+/** Прогресс приходит десятки раз в секунду — рассылаем список не чаще 4 раз в секунду. */
+function notify(immediate = false) {
+  if (immediate) {
+    if (notifyTimer) {
+      clearTimeout(notifyTimer)
+      notifyTimer = null
+    }
+    flush()
+    return
+  }
+  dirty = true
+  if (notifyTimer) return
+  notifyTimer = setTimeout(() => {
+    notifyTimer = null
+    if (dirty) flush()
+  }, 250)
 }
 
 export function onDownloadsChange(cb: (records: DownloadRecord[]) => void): () => void {
@@ -78,10 +100,10 @@ export function setDownloadPaused(id: string, paused: boolean): void {
   const record = records.find((r) => r.id === id)
   if (!record || record.status === 'done' || record.status === 'error' || record.status === 'cancelled') return
   record.status = paused ? 'paused' : 'active'
-  notify()
+  notify(true)
 }
 
 export function clearDownloadHistory(): void {
   records = records.filter((r) => r.status === 'active' || r.status === 'paused')
-  notify()
+  notify(true)
 }

@@ -38,3 +38,27 @@ export function humanBytes(bytes: number): string {
   const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
   return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
+
+/**
+ * Проверяет version JSON перед повторным использованием.
+ * Обрезанный при краше файл иначе принимался за рабочую версию,
+ * и запуск падал с непонятной ошибкой.
+ */
+export async function validVersionJson(file: string): Promise<boolean> {
+  try {
+    const raw = JSON.parse(await fs.promises.readFile(file, 'utf8')) as {
+      id?: unknown
+      mainClass?: unknown
+      inheritsFrom?: unknown
+      libraries?: unknown
+    }
+    return (
+      typeof raw.id === 'string' &&
+      raw.id.length > 0 &&
+      (typeof raw.mainClass === 'string' || typeof raw.inheritsFrom === 'string') &&
+      (raw.libraries === undefined || Array.isArray(raw.libraries))
+    )
+  } catch {
+    return false
+  }
+}

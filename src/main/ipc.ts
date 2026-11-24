@@ -35,6 +35,7 @@ import { installMod, listMods, optimizeApply, optimizePlan, removeMod, toggleMod
 import { p } from './paths'
 import { Progress, broadcast } from './progress'
 import { listScreenshots, removeScreenshot, resolveScreenshot } from './screenshots'
+import { checkForUpdate, downloadUpdate, installUpdate, openReleasePage } from './update'
 
 const SETTINGS_KEYS: (keyof Settings)[] = [
   'rootDir',
@@ -60,6 +61,7 @@ const SETTINGS_KEYS: (keyof Settings)[] = [
   'fontSize',
   'fontFamily',
   'reduceMotion',
+  'autoUpdate',
 ]
 
 function settingsPatch(patch: Partial<Settings>): Partial<Settings> {
@@ -152,7 +154,9 @@ export function registerIpc() {
     const id = String(versionId)
     await findManifestVersion(id)
     const taskId = `install:${id}`
-    const controller = beginDownload(taskId)
+    const lease = beginDownload(taskId)
+    if (!lease.owned) return { cancelled: false, alreadyRunning: true }
+    const { controller } = lease
     const progress = new Progress(taskId, `Установка Minecraft ${id}`)
     try {
       await installVersion(id, progress, controller)
@@ -398,6 +402,11 @@ export function registerIpc() {
   }))
 
   ipcMain.handle('app:system', async () => systemInfo())
+
+  ipcMain.handle('update:check', async (_e, force?: boolean) => checkForUpdate(!!force))
+  ipcMain.handle('update:download', async () => downloadUpdate())
+  ipcMain.handle('update:install', async () => installUpdate())
+  ipcMain.handle('update:open-release', async () => openReleasePage())
 
   ipcMain.handle('app:open-path', async (_e, kind: 'root' | 'instance' | 'mods' | 'resourcepacks' | 'shaderpacks' | 'crashes' | 'logs' | 'screenshots' | 'saves', instanceId?: string) => {
     const target = openTarget(kind, instanceId)

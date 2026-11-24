@@ -6,6 +6,7 @@ import { ensureDir, exists, fileSize } from './fsutil'
 import { downloadFile, fetchJson, USER_AGENT } from './http'
 import { p } from './paths'
 import type { Progress } from './progress'
+import { readZipFile } from './zip'
 
 const AUTH_URL = 'https://authserver.ely.by'
 export const ELY_INJECTOR_URL = 'https://authserver.ely.by/api/authlib-injector'
@@ -148,11 +149,20 @@ export async function refreshElyAccount(account: Account): Promise<Account> {
   }
 }
 
+/** Проверка, что файл — настоящий JAR/ZIP, а не обрезанный огрызок. */
+function isJarFile(file: string): boolean {
+  try {
+    return !!readZipFile(file, 'META-INF/MANIFEST.MF')
+  } catch {
+    return false
+  }
+}
+
 /** Скачивает authlib-injector, чтобы игра использовала сессии Ely.by, а не Mojang. */
 export async function ensureAuthlibInjector(progress: Progress): Promise<string> {
   const dir = path.join(p.cache(), 'authlib-injector')
   const dest = path.join(dir, 'authlib-injector.jar')
-  if ((await fileSize(dest)) > 100_000) return dest
+  if ((await fileSize(dest)) > 100_000 && isJarFile(dest)) return dest
 
   await ensureDir(dir)
   progress.phase('ely', 1)
@@ -170,8 +180,12 @@ export async function ensureAuthlibInjector(progress: Progress): Promise<string>
     /* используем закреплённую версию */
   }
 
+  await fs.promises.rm(dest, { force: true }).catch(() => {})
   await downloadFile(url, dest)
-  if (!(await exists(dest))) throw new Error('Не удалось скачать authlib-injector')
+  if (!(await exists(dest)) || !isJarFile(dest)) {
+    await fs.promises.rm(dest, { force: true }).catch(() => {})
+    throw new Error('Скачанный authlib-injector повреждён — попробуйте запустить ещё раз')
+  }
   return dest
 }
 

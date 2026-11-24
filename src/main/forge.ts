@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ensureDir, exists } from './fsutil'
+import { ensureDir, exists, validVersionJson } from './fsutil'
 import { downloadFile, fetchJson } from './http'
 import { selectJava } from './java'
 import { getVersionJson } from './mojang'
@@ -55,6 +55,29 @@ function runInstaller(javaPath: string, installer: string, target: string, progr
     const tail: string[] = []
     let buffer = ''
     let lines = 0
+    let settled = false
+    const settle = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (error) reject(error)
+      else resolve()
+    }
+    // Установщик Forge умеет зависать на ожидании сети — без таймаута лаунчер
+    // навсегда оставался в состоянии «Установка Forge…».
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        /* процесс мог уже завершиться */
+      }
+      const detail = tail.slice(-6).join('\n')
+      settle(
+        new Error(
+          `Установщик Forge не ответил за 10 минут и был остановлен${detail ? `\n${detail}` : ''}`,
+        ),
+      )
+    }, 10 * 60 * 1000)
 
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString('utf8')
@@ -75,15 +98,15 @@ function runInstaller(javaPath: string, installer: string, target: string, progr
     child.stdout?.on('data', onData)
     child.stderr?.on('data', onData)
     child.on('error', (error) => {
-      reject(new Error(`Не удалось запустить установщик Forge: ${error.message}`))
+      settle(new Error(`Не удалось запустить установщик Forge: ${error.message}`))
     })
     child.on('exit', (code) => {
       if (code === 0) {
-        resolve()
+        settle()
         return
       }
       const detail = tail.slice(-8).join('\n')
-      reject(new Error(`Установщик Forge завершился с кодом ${code ?? '—'}${detail ? `\n${detail}` : ''}`))
+      settle(new Error(`Установщик Forge завершился с кодом ${code ?? '—'}${detail ? `\n${detail}` : ''}`))
     })
   })
 }
@@ -102,7 +125,8 @@ export async function ensureForgeVersion(
   const loader = forgeVersion || (await latestForgeLoader(mcVersion))
   const id = `${mcVersion}-forge-${loader}`
   const jsonPath = path.join(p.version(id), `${id}.json`)
-  if (await exists(jsonPath)) return { id, loader }
+  if (await validVersionJson(jsonPath)) return { id, loader }
+  if (await exists(jsonPath)) await fs.promises.rm(jsonPath, { force: true }).catch(() => {})
 
   await ensureDir(path.dirname(jsonPath))
   const cacheDir = path.join(p.cache(), 'forge', `${mcVersion}-${loader}`)

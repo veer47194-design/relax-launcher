@@ -48,6 +48,8 @@ export interface Settings {
   fontSize: number
   fontFamily: FontFamily
   reduceMotion: boolean
+  /** Автоматически проверять обновления лаунчера при запуске. */
+  autoUpdate: boolean
 }
 
 export interface Account {
@@ -90,6 +92,7 @@ export interface AppState {
   settings: Settings
   instances: Instance[]
   accounts: Account[]
+  warning?: string | null
 }
 
 export interface ManifestVersion {
@@ -314,6 +317,29 @@ export interface SkinInfo {
   model: 'classic' | 'slim' | null
 }
 
+export interface UpdateInfo {
+  available: boolean
+  current: string
+  version?: string
+  notes?: string
+  pageUrl?: string
+  assetName?: string
+  assetUrl?: string
+  size?: number
+  publishedAt?: string
+  error?: string
+}
+
+export interface UpdateProgress {
+  phase: 'download' | 'ready' | 'error'
+  received: number
+  total: number
+  percent: number
+  version?: string
+  path?: string
+  error?: string
+}
+
 export interface OptimizeMod {
   slug: string
   title: string
@@ -455,7 +481,7 @@ export interface RelaxApi {
     installed(): Promise<string[]>
     fabricLoaders(mcVersion: string): Promise<{ version: string; stable: boolean }[]>
     forgeLoaders(mcVersion: string): Promise<{ version: string; stable: boolean; channel: string }[]>
-    install(versionId: string): Promise<{ cancelled: boolean }>
+    install(versionId: string): Promise<{ cancelled: boolean; alreadyRunning?: boolean }>
     remove(versionId: string): Promise<void>
   }
   download: {
@@ -513,6 +539,13 @@ export interface RelaxApi {
   }
   diagnostics: {
     crash(instanceId: string): Promise<CrashAnalysis>
+  }
+  update: {
+    check(force?: boolean): Promise<UpdateInfo>
+    download(): Promise<{ path: string }>
+    install(): Promise<void>
+    openRelease(): Promise<void>
+    onProgress(cb: (e: UpdateProgress) => void): () => void
   }
   window: {
     minimize(): void

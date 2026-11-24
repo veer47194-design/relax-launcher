@@ -1,8 +1,9 @@
 import type { VersionJson } from '../shared/types'
-import { exists } from './fsutil'
+import { exists, validVersionJson } from './fsutil'
 import { fetchJson } from './http'
 import { saveVersionJson } from './mojang'
 import { p } from './paths'
+import fs from 'node:fs'
 import path from 'node:path'
 
 const FABRIC_META = 'https://meta.fabricmc.net/v2'
@@ -36,7 +37,8 @@ export async function ensureFabricVersion(mcVersion: string, loaderVersion?: str
   const loader = loaderVersion || (await latestStableLoader(mcVersion))
   const id = `fabric-loader-${loader}-${mcVersion}`
   const local = path.join(p.version(id), `${id}.json`)
-  if (await exists(local)) return { id, loader }
+  if (await validVersionJson(local)) return { id, loader }
+  if (await exists(local)) await fs.promises.rm(local, { force: true }).catch(() => {})
   try {
     const profile = await fetchJson<VersionJson>(
       `${FABRIC_META}/versions/loader/${encodeURIComponent(mcVersion)}/${encodeURIComponent(loader)}/profile/json`,

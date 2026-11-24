@@ -34,12 +34,13 @@ function readEntries(buf: Buffer): RawEntry[] {
   const count = buf.readUInt16LE(eocd + 10)
   if (count === 0xffff) throw new Error('ZIP64 не поддерживается')
   const cdOffset = buf.readUInt32LE(eocd + 16)
+  if (cdOffset < 0 || cdOffset + 46 > buf.length) throw new Error('Повреждённый ZIP-архив (смещение центральной папки)')
 
   const entries: RawEntry[] = []
   let offset = cdOffset
   for (let i = 0; i < count; i++) {
+    if (offset + 46 > buf.length) throw new Error('Повреждённый ZIP-архив (обрезанная центральная папка)')
     if (buf.readUInt32LE(offset) !== 0x02014b50) throw new Error('Повреждённый ZIP-архив (центральная папка)')
-    const flags = buf.readUInt16LE(offset + 8)
     const method = buf.readUInt16LE(offset + 10)
     const compressedSize = buf.readUInt32LE(offset + 20)
     const size = buf.readUInt32LE(offset + 24)
@@ -47,13 +48,16 @@ function readEntries(buf: Buffer): RawEntry[] {
     const extraLen = buf.readUInt16LE(offset + 30)
     const commentLen = buf.readUInt16LE(offset + 32)
     const localOffset = buf.readUInt32LE(offset + 42)
+    if (offset + 46 + nameLen > buf.length) throw new Error('Повреждённый ZIP-архив (имя файла)')
     const rawName = buf.subarray(offset + 46, offset + 46 + nameLen)
-    const name = (flags & 0x800 ? rawName.toString('utf8') : rawName.toString('utf8')).replace(/\\/g, '/')
+    const name = rawName.toString('utf8').replace(/\\/g, '/')
 
+    if (localOffset + 30 > buf.length) throw new Error('Повреждённый ZIP-архив (локальный заголовок)')
     if (buf.readUInt32LE(localOffset) !== 0x04034b50) throw new Error('Повреждённый ZIP-архив (локальный заголовок)')
     const localNameLen = buf.readUInt16LE(localOffset + 26)
     const localExtraLen = buf.readUInt16LE(localOffset + 28)
     const dataStart = localOffset + 30 + localNameLen + localExtraLen
+    if (dataStart + compressedSize > buf.length) throw new Error('Повреждённый ZIP-архив (данные файла)')
 
     entries.push({ name, isDir: name.endsWith('/'), method, compressedSize, size, dataStart })
     offset += 46 + nameLen + extraLen + commentLen
@@ -61,8 +65,8 @@ function readEntries(buf: Buffer): RawEntry[] {
   return entries
 }
 
-export function listZip(file: string): ZipEntry[] {
-  const buf = fs.readFileSync(file)
+export async function listZip(file: string): Promise<ZipEntry[]> {
+  const buf = await fs.promises.readFile(file)
   const raw = readEntries(buf)
   return raw.map((e) => ({
     name: e.name,
@@ -116,6 +120,7 @@ export function readZipFile(file: string, entryName: string): Buffer | null {
     const count = tail.readUInt16LE(eocd + 10)
     if (count === 0xffff) throw new Error('ZIP64 не поддерживается')
     const cdOffset = tail.readUInt32LE(eocd + 16)
+    if (cdOffset < 0 || cdOffset > size - 22) throw new Error('Повреждённый ZIP-архив (смещение центральной папки)')
     const cd = readExact(fd, size - cdOffset, cdOffset)
     const wanted = entryName.replace(/\\/g, '/')
 
@@ -130,6 +135,7 @@ export function readZipFile(file: string, entryName: string): Buffer | null {
       const extraLen = cd.readUInt16LE(p + 30)
       const commentLen = cd.readUInt16LE(p + 32)
       const localOffset = cd.readUInt32LE(p + 42)
+      if (p + 46 + nameLen > cd.length) throw new Error('Повреждённый ZIP-архив (имя файла)')
       const name = cd.subarray(p + 46, p + 46 + nameLen).toString('utf8').replace(/\\/g, '/')
 
       if (name === wanted) {
@@ -221,9 +227,28 @@ export async function writeZip(
 ): Promise<{ files: number; bytes: number }> {
   if (entries.length > 0xffff) throw new Error('Слишком много файлов для ZIP (максимум 65535)')
 
-  const handle = await fs.promises.open(file, 'w')
+  // Считаем размер ДО открытия файла: иначе при превышении 4 ГБ пользователь
+  // оставался с обрезанным архивом на месте прошлого файла.
+  let estimate = 22
+  for (const entry of entries) {
+    let size = entry.data?.length
+    if (size === undefined) {
+      try {
+        size = (await fs.promises.stat(entry.file!)).size
+      } catch {
+        throw new Error(`Файл исчез во время экспорта: ${entry.name}`)
+      }
+    }
+    const nameLen = Buffer.byteLength(entry.name.replace(/\\/g, '/'))
+    estimate += 30 + nameLen + size + 46 + nameLen
+    if (estimate > 0xffffffff) throw new Error('Архив превышает 4 ГБ — ZIP64 не поддерживается')
+  }
+
+  const tmp = `${file}.part`
+  const handle = await fs.promises.open(tmp, 'w')
   const central: CentralRecord[] = []
   let offset = 0
+  let complete = false
   const total = entries.length
 
   try {
@@ -289,8 +314,14 @@ export async function writeZip(
     eocd.writeUInt32LE(cdStart, 16)
     await writeAllAsync(handle, eocd)
     offset += eocd.length
+    complete = true
   } finally {
     await handle.close()
+    if (complete) {
+      await fs.promises.rename(tmp, file)
+    } else {
+      await fs.promises.rm(tmp, { force: true }).catch(() => {})
+    }
   }
 
   return { files: central.length, bytes: offset }
@@ -322,7 +353,7 @@ export interface ExtractOptions {
 }
 
 export async function extractZip(zipFile: string, destDir: string, opts: ExtractOptions = {}): Promise<number> {
-  const buf = fs.readFileSync(zipFile)
+  const buf = await fs.promises.readFile(zipFile)
   const entries = readEntries(buf)
   const { prefix, extraPrefixes = [], exclude = [], onProgress } = opts
 

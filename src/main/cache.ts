@@ -1,6 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { CacheInfo } from '../shared/types'
+import { hasActiveDownloads } from './downloads'
+import { hasActiveTransfers } from './http'
+import { isModpackInstalling } from './modpack'
 import { p } from './paths'
 
 const SKIP_DIRS = new Set(['runtime'])
@@ -67,6 +70,10 @@ export async function getCacheInfo(): Promise<CacheInfo> {
 
 /** Удаляет только то, что можно скачать заново. Java-рантаймы и authlib-injector не трогаем. */
 export async function clearCache(): Promise<CacheInfo> {
+  // Удаление .part/.mrpack во время установки ломало rename и чтение архива.
+  if (hasActiveDownloads() || hasActiveTransfers() || isModpackInstalling()) {
+    throw new Error('Дождитесь окончания установки или загрузки — кеш занят')
+  }
   const before = await getCacheInfo()
 
   await walk(p.root(), async (file) => {

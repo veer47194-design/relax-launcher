@@ -69,10 +69,22 @@ export class DownloadController {
 
 const registry = new Map<string, DownloadController>()
 
-export function beginDownload(id: string): DownloadController {
+export interface DownloadLease {
+  controller: DownloadController
+  /** false — задача уже идёт, этот вызов не владеет контроллером и не должен его удалять. */
+  owned: boolean
+}
+
+export function beginDownload(id: string): DownloadLease {
+  const existing = registry.get(id)
+  if (existing && !existing.aborted) return { controller: existing, owned: false }
   const controller = new DownloadController()
   registry.set(id, controller)
-  return controller
+  return { controller, owned: true }
+}
+
+export function hasActiveDownloads(): boolean {
+  return registry.size > 0
 }
 
 export function getDownload(id: string): DownloadController | null {

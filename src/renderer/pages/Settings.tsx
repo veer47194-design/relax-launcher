@@ -43,6 +43,7 @@ export default function Settings() {
   const [wallpaperBusy, setWallpaperBusy] = useState(false)
   const [fontSize, setFontSize] = useState(s.fontSize)
   const [wallpaperOpacity, setWallpaperOpacity] = useState(Math.round(s.wallpaperOpacity * 100))
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   const pending = useRef<Partial<SettingsType>>({})
   const timer = useRef<number | null>(null)
@@ -89,8 +90,26 @@ export default function Settings() {
     }, 320)
   }
 
-  const detectJava = async () => {
-    setDetecting(true)
+  const checkUpdate = async () => {
+    setCheckingUpdate(true)
+    try {
+      const info = await api.update.check(true)
+      if (info.available) {
+        window.dispatchEvent(new CustomEvent('relax:update-available', { detail: info }))
+        toast(`Доступно обновление ${info.version}`, 'ok')
+      } else if (info.error) {
+        toast(info.error, 'err')
+      } else {
+        toast('У вас последняя версия лаунчера', 'ok')
+      }
+    } catch (e) {
+      toast(errText(e), 'err')
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const detectJava = async () => {    setDetecting(true)
     try {
       const list = await api.java.detect()
       setJavaList(list)
@@ -522,6 +541,16 @@ export default function Settings() {
               <Toggle checked={s.reduceMotion} onChange={(v) => update({ reduceMotion: v })} />
             </div>
           </div>
+
+          <div className="settings-row">
+            <div className="settings-row-info">
+              <strong>Автоматически проверять обновления</strong>
+              <span>Тихая проверка GitHub при запуске — без навязчивых окон</span>
+            </div>
+            <div className="settings-row-control">
+              <Toggle checked={s.autoUpdate} onChange={(v) => update({ autoUpdate: v })} />
+            </div>
+          </div>
         </Card>
 
         <Card className="settings-card">
@@ -678,6 +707,9 @@ export default function Settings() {
               </span>
             </div>
             <div className="settings-row-control">
+              <Button variant="soft" icon="refresh" loading={checkingUpdate} onClick={checkUpdate}>
+                Проверить обновления
+              </Button>
               <Button variant="ghost" icon="terminal" onClick={() => api.app.openPath('logs')}>
                 Логи
               </Button>

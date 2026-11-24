@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { DownloadRecord, ExitEvent, LogEvent, ProgressEvent, RelaxApi } from '../shared/types'
+import type { DownloadRecord, ExitEvent, LogEvent, ProgressEvent, RelaxApi, UpdateProgress } from '../shared/types'
 
 const on = <T>(channel: string, cb: (payload: T) => void) => {
   const handler = (_event: Electron.IpcRendererEvent, payload: T) => cb(payload)
@@ -97,6 +97,13 @@ const api: RelaxApi = {
   },
   diagnostics: {
     crash: (instanceId) => ipcRenderer.invoke('diagnostics:crash', instanceId),
+  },
+  update: {
+    check: (force) => ipcRenderer.invoke('update:check', force),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    openRelease: () => ipcRenderer.invoke('update:open-release'),
+    onProgress: (cb) => on<UpdateProgress>('update:progress', cb),
   },
   window: {
     minimize: () => ipcRenderer.send('win:minimize'),
