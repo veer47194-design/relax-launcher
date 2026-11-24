@@ -137,6 +137,33 @@ export async function forgetContent(
   }).catch(() => {})
 }
 
+/** Обновляет имя файла в манифесте после автоматического переименования. */
+export async function renameContent(
+  instanceId: string,
+  kind: ContentKind,
+  from: string,
+  to: string,
+): Promise<void> {
+  await enqueue(instanceId, async () => {
+    const data = await readManifest(instanceId)
+    const section = data[kind]
+    if (!section) return
+    const oldName = baseContentFile(from)
+    const next: Record<string, ContentRecord> = {}
+    let changed = false
+    for (const [projectId, record] of Object.entries(section)) {
+      if (record.file === oldName) {
+        next[projectId] = { ...record, file: baseContentFile(to) }
+        changed = true
+      } else {
+        next[projectId] = record
+      }
+    }
+    if (!changed) return
+    await writeManifest(instanceId, { ...data, [kind]: next })
+  }).catch(() => {})
+}
+
 /** Карта «имя файла → project id» для папки контента. */
 export async function contentProjectMap(
   instanceId: string,

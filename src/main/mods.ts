@@ -2,8 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ContentKind, Instance, ModInfo, OptimizeMod } from '../shared/types'
 import { config, ensureInstanceDirs } from './config'
-import { contentProjectMap, forgetContent, rememberContent } from './content-manifest'
-import { ensureDir, exists, safeJoin } from './fsutil'
+import { contentProjectMap, forgetContent, rememberContent, renameContent } from './content-manifest'
+import { ensureDir, exists, safeContentFileName, safeJoin } from './fsutil'
 import { downloadFile, mapLimit } from './http'
 import { getProject, getVersions, pickFile } from './modrinth'
 import { p } from './paths'
@@ -157,6 +157,40 @@ export async function listMods(instanceId: string, kind: ContentKind = 'mod'): P
   return mods.sort((a, b) => a.name.localeCompare(b.name, 'ru'))
 }
 
+/**
+ * Переименовывает файлы с квадратными скобками: Forge строит из таких имён
+ * автоматические Java-модули (`_1._20._1`), из-за чего игра падает с
+ * `java.lang.module.ResolutionException` до загрузки самих модов.
+ */
+export async function sanitizeModFileNames(
+  instanceId: string,
+  kind: ContentKind = 'mod',
+): Promise<string[]> {
+  const dir = contentDir(instanceId, kind)
+  let entries: fs.Dirent[]
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const renamed: string[] = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !/\.(jar|zip)(\.disabled)?$/i.test(entry.name)) continue
+    const clean = safeContentFileName(entry.name)
+    if (clean === entry.name) continue
+    const target = safeJoin(dir, clean)
+    if (await exists(target)) continue
+    try {
+      await fs.promises.rename(path.join(dir, entry.name), target)
+      await renameContent(instanceId, kind, entry.name, clean)
+      renamed.push(`${entry.name} → ${clean}`)
+    } catch {
+      /* файл мог исчезнуть или быть занят — пропускаем */
+    }
+  }
+  return renamed
+}
+
 export async function toggleMod(
   instanceId: string,
   file: string,
@@ -221,7 +255,7 @@ async function installModFile(
     return
   }
 
-  const filename = path.basename(file.filename)
+  const filename = safeContentFileName(file.filename)
   const dest = safeJoin(contentDir(instance.id, kind), filename)
   await ensureDir(path.dirname(dest))
   if (await exists(dest)) {

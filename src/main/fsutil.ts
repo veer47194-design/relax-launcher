@@ -22,6 +22,27 @@ export async function fileSize(file: string): Promise<number> {
   }
 }
 
+/**
+ * Имя вроде `[1.20.1] SecurityCraft.jar` превращается в Java-модуль `_1._20._1`
+ * и конфликтует с модулем `minecraft` (ResolutionException при старте Forge).
+ * Убираем ведущий тег версии и квадратные скобки, остальное имя сохраняем.
+ */
+export function safeContentFileName(input: string): string {
+  const base = path.basename(input)
+  let out = base
+    .replace(/^\s*\[[^\]]*\]\s*/, '')
+    .replace(/[\[\]]/g, '-')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  if (!out || /^\./.test(out) || !/\.(jar|zip)(\.disabled)?$/i.test(out)) {
+    out = base.replace(/[\[\]]/g, '-').replace(/\s{2,}/g, ' ').trim()
+  }
+  if (!out || /^\./.test(out)) {
+    out = `mod-${base.replace(/[^a-z0-9._-]+/gi, '-')}`
+  }
+  return out
+}
+
 export function safeJoin(base: string, relative: string): string {
   const clean = relative.replace(/\\/g, '/').replace(/^\/+/, '')
   const target = path.resolve(base, clean)

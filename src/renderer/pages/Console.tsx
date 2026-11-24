@@ -23,9 +23,10 @@ export default function Console() {
       .history(instance.id)
       .then((list) => !cancelled && setLines(list))
       .catch(() => {})
-    const offLog = api.on.log((event) => {
-      if (event.instanceId !== instance.id) return
-      setLines((prev) => [...prev.slice(-2999), event])
+    const offLog = api.on.logs((events) => {
+      const own = events.filter((event) => event.instanceId === instance.id)
+      if (own.length === 0) return
+      setLines((prev) => [...prev, ...own].slice(-3000))
     })
     const offExit = api.on.exit((event) => {
       if (event.instanceId !== instance.id) return

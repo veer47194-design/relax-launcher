@@ -19,6 +19,7 @@ import { ensureFabricVersion } from './fabric'
 import { ensureForgeVersion } from './forge'
 import { ensureDir } from './fsutil'
 import { selectJava } from './java'
+import { sanitizeModFileNames } from './mods'
 import { defaultFeatures, installVersion, materializeLegacyResources, rulesAllow } from './mojang'
 import { p } from './paths'
 import { Progress, broadcast } from './progress'
@@ -206,6 +207,9 @@ export function buildLaunchPlan(
 export class Launcher {
   private running = new Map<string, RunningProcess>()
   private logs = new Map<string, LogEvent[]>()
+  /** Логи отправляются пачками: поток модов легко выдаёт тысячи строк в секунду. */
+  private pendingLogs = new Map<string, LogEvent[]>()
+  private logTimers = new Map<string, NodeJS.Timeout>()
 
   isRunning(instanceId: string): boolean {
     return this.running.has(instanceId)
@@ -231,6 +235,18 @@ export class Launcher {
     if (!account) throw new Error('Сначала добавьте аккаунт во вкладке «Аккаунты»')
 
     await ensureInstanceDirs(instanceId)
+    if (instance.loader === 'forge') {
+      // Чинимlegacy-паки: имена с `[1.20.1]` ломают JPMS-модули Forge.
+      const renamed = await sanitizeModFileNames(instanceId)
+      if (renamed.length > 0) {
+        this.pushLog(instanceId, {
+          instanceId,
+          stream: 'system',
+          at: Date.now(),
+          line: `[Relax] Для Forge переименованы файлы: ${renamed.join('; ')}`,
+        })
+      }
+    }
     const progress = new Progress(`launch:${instanceId}`, `Запуск «${instance.name}»`)
 
     try {
@@ -339,6 +355,7 @@ export class Launcher {
         } catch {
           /* поток мог быть уже закрыт */
         }
+        this.flushLogs(instanceId)
         this.running.delete(instanceId)
         let event: ExitEvent
         if (spawnError) {
@@ -376,6 +393,24 @@ export class Launcher {
         }
       }
 
+      const stdout = child.stdout
+      const stderr = child.stderr
+      // Если диск не успевает писать лог, приостанавливаем чтение pipe игры.
+      // Иначе буфер pipe заполняется, Java блокируется на записи в консоль
+      // и окно Minecraft показывает «Не отвечает».
+      let drainWaiting = false
+      const pauseForDrain = () => {
+        if (drainWaiting) return
+        drainWaiting = true
+        stdout?.pause()
+        stderr?.pause()
+        logStream.once('drain', () => {
+          drainWaiting = false
+          stdout?.resume()
+          stderr?.resume()
+        })
+      }
+
       const makeHandler = (stream: 'stdout' | 'stderr') => {
         let buffer = ''
         return (chunk: Buffer) => {
@@ -384,13 +419,13 @@ export class Launcher {
           buffer = parts.pop() ?? ''
           for (const line of parts) {
             if (!line.trim()) continue
-            logStream.write(`${line}\n`)
+            if (!logStream.write(`${line}\n`)) pauseForDrain()
             this.pushLog(instanceId, { instanceId, stream, line, at: Date.now() })
           }
         }
       }
-      child.stdout?.on('data', makeHandler('stdout'))
-      child.stderr?.on('data', makeHandler('stderr'))
+      stdout?.on('data', makeHandler('stdout'))
+      stderr?.on('data', makeHandler('stderr'))
 
       // Ждём именно событие spawn: при ошибке (нет Java, PATH, доступ) Node не шлёт exit,
       // и раньше лаунчер показывал «игра запущена», хотя процесс не создан.
@@ -464,7 +499,29 @@ export class Launcher {
     list.push(event)
     if (list.length > MAX_LOG_LINES) list.splice(0, list.length - MAX_LOG_LINES)
     this.logs.set(instanceId, list)
-    broadcast('launch:log', event)
+
+    const pending = this.pendingLogs.get(instanceId) ?? []
+    pending.push(event)
+    this.pendingLogs.set(instanceId, pending)
+    if (!this.logTimers.has(instanceId)) {
+      const timer = setTimeout(() => {
+        this.logTimers.delete(instanceId)
+        this.flushLogs(instanceId)
+      }, 80)
+      this.logTimers.set(instanceId, timer)
+    }
+  }
+
+  /** Отправляет накопленные строки сразу — перед событием выхода или остановкой. */
+  private flushLogs(instanceId: string) {
+    const timer = this.logTimers.get(instanceId)
+    if (timer) {
+      clearTimeout(timer)
+      this.logTimers.delete(instanceId)
+    }
+    const pending = this.pendingLogs.get(instanceId)
+    this.pendingLogs.delete(instanceId)
+    if (pending?.length) broadcast('launch:logs', pending)
   }
 }
 

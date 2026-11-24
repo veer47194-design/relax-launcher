@@ -116,6 +116,7 @@ const api: RelaxApi = {
     download: (cb) => on<{ id: string; paused: boolean }>('download:state', cb),
     downloads: (cb) => on<DownloadRecord[]>('downloads:list', cb),
     log: (cb) => on<LogEvent>('launch:log', cb),
+    logs: (cb) => on<LogEvent[]>('launch:logs', cb),
     exit: (cb) => on<ExitEvent>('launch:exit', cb),
     state: (cb) => on('state', cb),
   },

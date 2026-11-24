@@ -2,11 +2,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { Instance, Loader, ModpackInstallResult } from '../shared/types'
 import { config, ensureInstanceDirs } from './config'
-import { ensureDir, safeJoin } from './fsutil'
+import { ensureDir, safeContentFileName, safeJoin } from './fsutil'
 import { downloadFile, mapLimit } from './http'
 import { fabricLoaders, latestStableLoader } from './fabric'
 import { forgeLoaders, latestForgeLoader } from './forge'
 import { getProject, getVersions, pickFile } from './modrinth'
+import { sanitizeModFileNames } from './mods'
 import { p } from './paths'
 import { Progress } from './progress'
 import { extractZip, listZip, readZipFile } from './zip'
@@ -143,7 +144,9 @@ async function installFromMrpackInner(
       files,
       8,
       async (f) => {
-        const target = safeJoin(instanceDir, f.path)
+        const folder = path.dirname(f.path)
+        const name = safeContentFileName(f.path)
+        const target = safeJoin(instanceDir, folder === '.' ? name : path.join(folder, name))
         await ensureDir(path.dirname(target))
         await downloadFile(f.downloads![0], target, { sha1: f.hashes?.sha1, size: f.fileSize })
         downloaded++
@@ -158,6 +161,12 @@ async function installFromMrpackInner(
       extraPrefixes: ['client-overrides/'],
       onProgress: (n, total) => progress.set(n, total, `Файлы сборки ${n} / ${total}`),
     })
+
+    // Имена из overrides тоже могут содержать `[1.20.1]` — чиним их сразу,
+    // иначе Forge упадёт с ResolutionException ещё до загрузки модов.
+    for (const kind of ['mod', 'resourcepack', 'shader'] as const) {
+      await sanitizeModFileNames(created.id, kind)
+    }
 
     progress.done(`Установлено файлов: ${downloaded}${extracted ? `, overrides: ${extracted}` : ''}`)
     return { instance: created, files: downloaded + extracted }

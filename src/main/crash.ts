@@ -17,6 +17,10 @@ const HINTS: { test: RegExp; hint: string }[] = [
     test: /NoSuchMethodError|NoClassDefFoundError|ClassNotFoundException|Mixin apply failed|MixinTransformerError/i,
     hint: 'Несовместимая версия мода или конфликт модов. Попробуйте обновить подозреваемый мод.',
   },
+  {
+    test: /java\.lang\.module\.ResolutionException|export package .* to module/i,
+    hint: 'Конфликт Java-модулей: имя мода с квадратными скобками (например, [1.20.1] Mod.jar) ломает Forge. Лаунчер 0.1.3+ переименовывает такие файлы автоматически.',
+  },
   { test: /GLFW error|Pixel format not accelerated|OpenGL/i, hint: 'Проблема с драйверами видеокарты или OpenGL. Обновите драйверы.' },
   { test: /Could not find or load main class|ClassNotFoundException: net\.minecraft/i, hint: 'Файлы версии повреждены — переустановите версию.' },
   { test: /Address already in use/i, hint: 'Порт уже занят другим процессом. Закройте лишние программы.' },
@@ -95,9 +99,10 @@ export async function analyzeCrash(
   const hints = HINTS.filter(({ test }) => test.test(text)).map(({ hint }) => hint)
 
   const suspects: { name: string; score: number }[] = []
+  let modFiles: string[] = []
   try {
-    const files = await fs.promises.readdir(p.instanceMods(instanceId))
-    for (const file of files) {
+    modFiles = await fs.promises.readdir(p.instanceMods(instanceId))
+    for (const file of modFiles) {
       if (!/\.(jar|zip)(\.disabled)?$/i.test(file)) continue
       const name = modBaseName(file)
       if (name.length < 3) continue
@@ -112,6 +117,15 @@ export async function analyzeCrash(
     }
   } catch {
     /* папки модов может ещё не быть */
+  }
+
+  // Квадратные скобки в имени файла превращаются в модуль `_1._20._1`
+  // и приводят к ResolutionException на Forge до загрузки модов.
+  const bracketed = modFiles.filter((file) => /[\[\]]/.test(file) && /\.(jar|zip)/i.test(file))
+  if (bracketed.length > 0) {
+    hints.push(
+      `Переименуйте файлы модов с квадратными скобками: ${bracketed.slice(0, 4).join(', ')}. Это частая причина падения Forge.`,
+    )
   }
 
   suspects.sort((a, b) => b.score - a.score)

@@ -560,6 +560,7 @@ export interface RelaxApi {
     download(cb: (e: { id: string; paused: boolean }) => void): () => void
     downloads(cb: (records: DownloadRecord[]) => void): () => void
     log(cb: (e: LogEvent) => void): () => void
+    logs(cb: (events: LogEvent[]) => void): () => void
     exit(cb: (e: ExitEvent) => void): () => void
     state(cb: (s: AppState) => void): () => void
   }
