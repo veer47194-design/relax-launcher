@@ -716,6 +716,22 @@ export default function Settings() {
               <Button variant="ghost" icon="external" onClick={() => api.app.openExternal('https://modrinth.com')}>
                 Modrinth
               </Button>
+              <Button
+                variant="ghost"
+                icon="external"
+                onClick={() => api.app.openExternal('https://relaxlr.github.io/')}
+              >
+                Наш сайт
+              </Button>
+              <Button
+                variant="ghost"
+                icon="external"
+                onClick={() =>
+                  api.app.openExternal('https://github.com/veer47194-design/relax-launcher')
+                }
+              >
+                GitHub
+              </Button>
             </div>
           </div>
           <div className="tiny">

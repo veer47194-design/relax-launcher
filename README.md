@@ -4,9 +4,10 @@
 
 # Relax Launcher
 
-**Быстрый, лёгкий и красивый лаунчер Minecraft для Windows.**  
+**Быстрый, лёгкий и красивый лаунчер Minecraft для Windows и Linux (Debian/Ubuntu).**  
 Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boost — всё в одном окне.
 
+[![Сайт](https://img.shields.io/badge/Сайт-relaxlr.github.io-5eead4?style=for-the-badge)](https://relaxlr.github.io/)
 [![Версия](https://img.shields.io/github/v/release/veer47194-design/relax-launcher?style=for-the-badge&logo=github&color=7c5cff&label=release)](https://github.com/veer47194-design/relax-launcher/releases/latest)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![Лицензия](https://img.shields.io/badge/license-MIT-34d399?style=for-the-badge)](LICENSE)
@@ -31,9 +32,9 @@ Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boo
 
 |Файл|Что это|
 |---|---|
-|[Relax-Launcher-Setup-0.1.5.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-Setup-0.1.5.exe)|Установщик NSIS: выбор папки, ярлыки на рабочем столе и в меню «Пуск»|
-|[Relax-Launcher-Portable-0.1.5.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-Portable-0.1.5.exe)|Portable-версия: просто скопируйте и запустите без установки|
-|[Relax-Launcher-linux-0.1.5.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-linux-0.1.5.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.5.deb`. Зависимости GTK/NSS/звука подтянутся через apt автоматически|
+|[Relax-Launcher-Setup-0.1.6.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-Setup-0.1.6.exe)|Установщик NSIS: выбор папки, ярлыки на рабочем столе и в меню «Пуск»|
+|[Relax-Launcher-Portable-0.1.6.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-Portable-0.1.6.exe)|Portable-версия: просто скопируйте и запустите без установки|
+|[Relax-Launcher-linux-0.1.6.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-linux-0.1.6.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.6.deb`. Зависимости GTK/NSS/звука подтянутся через apt автоматически|
 
 > Установщик **не подписан цифровой подписью**. Windows может показать SmartScreen: нажмите «Подробнее» → «Выполнить в любом случае». Это нормально для локальной сборки. На Linux автообновление через лаунчер не запускается — баннер ведёт на страницу релиза, где лежит свежий `.deb`.
 
