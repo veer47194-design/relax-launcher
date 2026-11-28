@@ -100,6 +100,41 @@ function assetOf(release: GitHubRelease): { name: string; url: string; size: num
   return { name: picked.name, url: picked.browser_download_url, size: picked.size }
 }
 
+/**
+ * Резервный путь, когда GitHub API отдаёт 403 из-за лимита запросов.
+ * Страница /releases/latest не лимитируется так же жёстко: профайлим редирект
+ * и достаём версию из адреса, а ссылку на установщик собираем сами.
+ */
+async function fromLatestPage(current: string): Promise<UpdateInfo | null> {
+  const page = `https://github.com/${REPO}/releases/latest`
+  const res = await fetch(page, {
+    headers: { 'User-Agent': USER_AGENT },
+    redirect: 'manual',
+    signal: AbortSignal.timeout(15000),
+  })
+  const location = res.headers.get('location') ?? ''
+  let version = ''
+  const fromRedirect = /\/tag\/v?([^/?#]+)/i.exec(location)
+  if (fromRedirect) version = decodeURIComponent(fromRedirect[1])
+  if (!version && res.ok) {
+    const html = (await res.text()).slice(0, 300000)
+    const fromHtml = /\/tag\/v?(\d[\w.-]*)/i.exec(html)
+    if (fromHtml) version = fromHtml[1]
+  }
+  version = String(version).replace(/^v/i, '')
+  if (!/^\d[\w.-]*$/.test(version)) return null
+  const assetName = `Relax-Launcher-Setup-${version}.exe`
+  return {
+    available: compareVersions(version, current) > 0,
+    current,
+    version,
+    notes: '',
+    pageUrl: location ? new URL(location, page).toString() : page,
+    assetName,
+    assetUrl: `https://github.com/${REPO}/releases/download/v${version}/${assetName}`,
+  }
+}
+
 export async function checkForUpdate(force = false): Promise<UpdateInfo> {
   const current = app.getVersion()
   const cached = readCache()
@@ -130,10 +165,24 @@ export async function checkForUpdate(force = false): Promise<UpdateInfo> {
     return info
   } catch (e) {
     const message = (e as Error).message
+    if (/rate limit|403|forbidden/i.test(message)) {
+      try {
+        const fallback = await fromLatestPage(current)
+        if (fallback) {
+          pending = fallback.available ? fallback : null
+          writeCache(fallback)
+          return fallback
+        }
+      } catch {
+        /* запасной путь не сработал — покажем понятную ошибку ниже */
+      }
+    }
     return {
       available: false,
       current,
-      error: /rate limit/i.test(message) ? 'GitHub временно ограничил проверку обновлений' : message,
+      error: /rate limit|403/i.test(message)
+        ? 'GitHub временно ограничил проверку обновлений'
+        : message,
     }
   }
 }
