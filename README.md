@@ -33,7 +33,7 @@ Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boo
 |---|---|
 |[Relax-Launcher-Setup-0.1.5.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-Setup-0.1.5.exe)|Установщик NSIS: выбор папки, ярлыки на рабочем столе и в меню «Пуск»|
 |[Relax-Launcher-Portable-0.1.5.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-Portable-0.1.5.exe)|Portable-версия: просто скопируйте и запустите без установки|
-|[Relax-Launcher-linux-0.1.5.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-linux-0.1.5.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.5.deb`|
+|[Relax-Launcher-linux-0.1.5.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.5/Relax-Launcher-linux-0.1.5.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.5.deb`. Зависимости GTK/NSS/звука подтянутся через apt автоматически|
 
 > Установщик **не подписан цифровой подписью**. Windows может показать SmartScreen: нажмите «Подробнее» → «Выполнить в любом случае». Это нормально для локальной сборки. На Linux автообновление через лаунчер не запускается — баннер ведёт на страницу релиза, где лежит свежий `.deb`.
 
@@ -124,6 +124,8 @@ npm run dist:linux
 ```
 
 В репозитории `.deb` собирается автоматически в GitHub Actions: workflow `.github/workflows/linux-deb.yml` запускается на `ubuntu-latest` и загружает готовый пакет в последний релиз.
+
+Для Debian пакет оптимизирован: из Electron удалены лишние локали (оставлены `en` и `ru`), архив упакован в xz, а список зависимостей явно содержит нужные библиотеки — `apt install` подтянет их сам. Устаревший `libappindicator1` в зависимости не входит.
 
 > **npm 12+**: если после `npm install` Electron не запускается, разрешите скрипты зависимостей:  
 > `npm install-scripts approve electron esbuild` или вручную `node node_modules/electron/install.js`.
