@@ -32,9 +32,9 @@ Vanilla, Fabric и Forge, Modrinth, Ely.by, автоподбор Java и FPS Boo
 
 |Файл|Что это|
 |---|---|
-|[Relax-Launcher-Setup-0.1.6.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-Setup-0.1.6.exe)|Установщик NSIS: выбор папки, ярлыки на рабочем столе и в меню «Пуск»|
-|[Relax-Launcher-Portable-0.1.6.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-Portable-0.1.6.exe)|Portable-версия: просто скопируйте и запустите без установки|
-|[Relax-Launcher-linux-0.1.6.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.6/Relax-Launcher-linux-0.1.6.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.6.deb`. Зависимости GTK/NSS/звука подтянутся через apt автоматически|
+|[Relax-Launcher-Setup-0.1.7.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.7/Relax-Launcher-Setup-0.1.7.exe)|Установщик NSIS: выбор папки, ярлыки на рабочем столе и в меню «Пуск»|
+|[Relax-Launcher-Portable-0.1.7.exe](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.7/Relax-Launcher-Portable-0.1.7.exe)|Portable-версия: просто скопируйте и запустите без установки|
+|[Relax-Launcher-linux-0.1.7.deb](https://github.com/veer47194-design/relax-launcher/releases/download/v0.1.7/Relax-Launcher-linux-0.1.7.deb)|Debian/Ubuntu: `sudo apt install ./Relax-Launcher-linux-0.1.7.deb`. Зависимости GTK/NSS/звука подтянутся через apt автоматически|
 
 > Установщик **не подписан цифровой подписью**. Windows может показать SmartScreen: нажмите «Подробнее» → «Выполнить в любом случае». Это нормально для локальной сборки. На Linux автообновление через лаунчер не запускается — баннер ведёт на страницу релиза, где лежит свежий `.deb`.
 

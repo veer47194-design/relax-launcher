@@ -124,6 +124,20 @@ async function fromLatestPage(current: string): Promise<UpdateInfo | null> {
   version = String(version).replace(/^v/i, '')
   if (!/^\d[\w.-]*$/.test(version)) return null
   const assetName = `Relax-Launcher-Setup-${version}.exe`
+  const assetUrl = `https://github.com/${REPO}/releases/download/v${version}/${assetName}`
+  // Без размера прогресс-бар в баннере показывает 0% — узнаём его HEAD-запросом.
+  let size: number | undefined
+  try {
+    const head = await fetch(assetUrl, {
+      method: 'HEAD',
+      headers: { 'User-Agent': USER_AGENT },
+      signal: AbortSignal.timeout(10000),
+    })
+    const length = Number(head.headers.get('content-length'))
+    if (Number.isFinite(length) && length > 0) size = length
+  } catch {
+    /* размер не критичен, покачаем без него */
+  }
   return {
     available: compareVersions(version, current) > 0,
     current,
@@ -131,7 +145,8 @@ async function fromLatestPage(current: string): Promise<UpdateInfo | null> {
     notes: '',
     pageUrl: location ? new URL(location, page).toString() : page,
     assetName,
-    assetUrl: `https://github.com/${REPO}/releases/download/v${version}/${assetName}`,
+    assetUrl,
+    size,
   }
 }
 

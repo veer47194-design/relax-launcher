@@ -178,12 +178,22 @@ export async function sanitizeModFileNames(
     if (!entry.isFile() || !/\.(jar|zip)(\.disabled)?$/i.test(entry.name)) continue
     const clean = safeContentFileName(entry.name)
     if (clean === entry.name) continue
-    const target = safeJoin(dir, clean)
-    if (await exists(target)) continue
+    // Если файл без скобок уже есть, просто пропустить нельзя: Problems-мод
+    // останется с кривым именем и снова уронит Forge. Даём уникальное имя.
+    let targetName = clean
+    if (await exists(safeJoin(dir, targetName))) {
+      const match = /\.(jar|zip)(\.disabled)?$/i.exec(clean)
+      const ext = match ? match[0] : ''
+      const base = ext ? clean.slice(0, -ext.length) : clean
+      let n = 1
+      while (await exists(safeJoin(dir, `${base}-relax${n}${ext}`))) n++
+      targetName = `${base}-relax${n}${ext}`
+    }
+    const target = safeJoin(dir, targetName)
     try {
       await fs.promises.rename(path.join(dir, entry.name), target)
-      await renameContent(instanceId, kind, entry.name, clean)
-      renamed.push(`${entry.name} → ${clean}`)
+      await renameContent(instanceId, kind, entry.name, targetName)
+      renamed.push(`${entry.name} → ${targetName}`)
     } catch {
       /* файл мог исчезнуть или быть занят — пропускаем */
     }
