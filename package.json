@@ -92,7 +92,6 @@
       "description": "Relax Launcher — лаунчер Minecraft с модами и сборками",
       "artifactName": "Relax-Launcher-linux-${version}.${ext}",
       "electronLanguages": ["en", "ru"],
-      "compression": "xz",
       "depends": [
         "libgtk-3-0",
         "libnotify4",
