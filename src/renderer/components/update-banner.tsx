@@ -14,6 +14,14 @@ export function UpdateBanner() {
   const [progress, setProgress] = useState<UpdateProgress | null>(null)
   const [busy, setBusy] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const [platform, setPlatform] = useState('win32')
+
+  useEffect(() => {
+    api.app
+      .info()
+      .then((i) => setPlatform(i.platform))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const off = api.update.onProgress((event) => {
@@ -103,9 +111,11 @@ export function UpdateBanner() {
         <div className="grow">
           <strong>{ready ? 'Обновление готово' : `Доступно обновление ${version}`}</strong>
           <span>
-            {ready
-              ? 'Перезапустите лаунчер, чтобы установить новую версию'
-              : `Сейчас установлена ${info?.current}${sizeMb ? ` · ${sizeMb}` : ''}`}
+            {platform !== 'win32'
+              ? `Сейчас установлена ${info?.current ?? ''} · пакет .deb на странице релиза`
+              : ready
+                ? 'Перезапустите лаунчер, чтобы установить новую версию'
+                : `Сейчас установлена ${info?.current}${sizeMb ? ` · ${sizeMb}` : ''}`}
           </span>
         </div>
         <button className="icon-btn" onClick={() => setDismissed(true)} aria-label="Скрыть">
@@ -124,7 +134,12 @@ export function UpdateBanner() {
       )}
 
       <div className="update-banner-actions">
-        {ready ? (
+        {platform !== 'win32' ? (
+          <button className="btn btn-primary btn-sm" onClick={() => api.update.openRelease()}>
+            <Icon name="download" size={13} />
+            Скачать .deb
+          </button>
+        ) : ready ? (
           <button className="btn btn-primary btn-sm" onClick={install}>
             <Icon name="refresh" size={13} />
             Перезапустить и установить
@@ -135,7 +150,7 @@ export function UpdateBanner() {
             {busy ? 'Скачивание…' : 'Обновить'}
           </button>
         )}
-        {!ready && (
+        {platform === 'win32' && !ready && (
           <button className="btn btn-ghost btn-sm" onClick={download} disabled={busy}>
             Только скачать
           </button>

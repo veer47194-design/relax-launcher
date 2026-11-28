@@ -188,6 +188,9 @@ export async function checkForUpdate(force = false): Promise<UpdateInfo> {
 }
 
 export async function downloadUpdate(): Promise<{ path: string }> {
+  if (process.platform !== 'win32') {
+    throw new Error('На Linux обновление ставится вручную: скачайте .deb со страницы релиза')
+  }
   if (downloading) throw new Error('Обновление уже скачивается')
   const info = pending ?? (await checkForUpdate(true))
   if (!info.available || !info.assetUrl || !info.assetName) {

@@ -13,7 +13,8 @@
     "start": "electron .",
     "typecheck": "tsc --noEmit",
     "dist:win": "npm run build && electron-builder --win --x64",
-    "dist:portable": "npm run build && electron-builder --win portable --x64"
+    "dist:portable": "npm run build && electron-builder --win portable --x64",
+    "dist:linux": "npm run build && electron-builder --linux deb --x64"
   },
   "dependencies": {
     "react": "^19.3.1",
@@ -77,6 +78,19 @@
     },
     "portable": {
       "artifactName": "Relax-Launcher-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Game",
+      "maintainer": "Relax Launcher <veer47194-design@users.noreply.github.com>",
+      "description": "Relax Launcher — лаунчер Minecraft с модами и сборками",
+      "artifactName": "Relax-Launcher-linux-${version}.${ext}"
     }
   }
 }
