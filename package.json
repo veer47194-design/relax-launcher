@@ -88,7 +88,6 @@
         }
       ],
       "category": "Game",
-      "desktopName": "Relax Launcher",
       "maintainer": "Relax Launcher <veer47194-design@users.noreply.github.com>",
       "description": "Relax Launcher — лаунчер Minecraft с модами и сборками",
       "artifactName": "Relax-Launcher-linux-${version}.${ext}"
