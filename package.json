@@ -5,6 +5,11 @@
   "private": true,
   "description": "Relax Launcher — быстрый лаунчер Minecraft: Vanilla, Fabric, моды и сборки Modrinth, офлайн-аккаунты",
   "author": "Relax",
+  "homepage": "https://github.com/veer47194-design/relax-launcher",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/veer47194-design/relax-launcher.git"
+  },
   "license": "MIT",
   "main": "dist/main/index.js",
   "scripts": {
@@ -79,19 +84,7 @@
     "portable": {
       "artifactName": "Relax-Launcher-Portable-${version}.${ext}"
     },
-    "linux": {
-      "icon": "build/icon.png",
-      "target": [
-        {
-          "target": "deb",
-          "arch": ["x64"]
-        }
-      ],
-      "category": "Game",
-      "maintainer": "Relax Launcher <veer47194-design@users.noreply.github.com>",
-      "description": "Relax Launcher — лаунчер Minecraft с модами и сборками",
-      "artifactName": "Relax-Launcher-linux-${version}.${ext}",
-      "electronLanguages": ["en", "ru"],
+    "deb": {
       "depends": [
         "libgtk-3-0",
         "libnotify4",
@@ -117,6 +110,15 @@
         "libglib2.0-0",
         "libxkbcommon0"
       ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": ["deb"],
+      "category": "Game",
+      "maintainer": "Relax Launcher <veer47194-design@users.noreply.github.com>",
+      "description": "Relax Launcher — лаунчер Minecraft с модами и сборками",
+      "artifactName": "Relax-Launcher-linux-${version}.${ext}",
+      "electronLanguages": ["en", "ru"]
     }
   }
 }
